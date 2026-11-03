@@ -1,4 +1,4 @@
-﻿# VitoiceCompare
+# VitoiceCompare
 
 基于 Tauri 2 + `czkawka_core` 的视频素材去重/整理工具。保留 Czkawka 的 14 个工具能力，重做结果呈现层。
 
@@ -26,14 +26,48 @@ design/
 
 ```powershell
 cd app
-.\run.ps1            # 开发版（debug），编译快、运行慢
-.\build-release.ps1  # 发布版（release），编译稍慢、运行快 10 倍以上
+.\run.ps1              # 开发版（debug），编译快、运行慢
+.\build-release.ps1    # 发布版（release），编译稍慢、运行快 10 倍以上
+.\build-installer.ps1  # 生成 Windows 安装包（NSIS）
 ```
 
 > ⚠️ debug 构建的解码性能只有 release 的 1/10 左右。日常扫描请用 `build-release.ps1`，
-> 它会把产物放到 `G:\Code\videocc-release\release\videocc.exe`。
+> 它会把产物放到 `G:\Code\videocc-release\release\vitoicecompare.exe`。
+
+## 发布
+
+```powershell
+cd app
+.\build-installer.ps1
+# → G:\Code\videocc-release\release\bundle\nsis\VitoiceCompare_0.1.0_x64-setup.exe
+```
+
+- 安装模式：当前用户（`currentUser`），无需管理员权限；
+- 安装包约 2.3 MB（应用本体 9.2 MB，LZMA 压缩）；
+- 静默安装：`VitoiceCompare_0.1.0_x64-setup.exe /S /D=C:\目标目录`；
+- 卸载：安装目录下的 `uninstall.exe`。
+
+## 测试
+
+```powershell
+cd app\src-tauri
+cargo test --lib                          # 10 个单元测试
+cargo run --release --features bench --bin bench -- <目录>   # 召回基准
+```
+
+单元测试覆盖：pHash 的确定性与抗噪性、汉明距离、帧偏移对齐、分组并查集、时长过滤、日志时间格式。
+
+召回基准：目录内文件名约定为 `<源编号>__<变体>.mp4`，同编号为同源。测试会打印
+tol × 阈值 的召回/精确矩阵，用于标定参数。当前标定结果（48 文件 / 72 正样本 / 1056 负样本）：
+tol 20 + 阈值 0.85 → 召回 100%、精确 100%。
+
+## 日志
+
+运行日志写在 `%LOCALAPPDATA%\VitoiceCompare\logs\app.log`，超过 2 MB 自动轮转为 `app.1.log`。
+设置页「运行日志 → 打开」可直接定位。扫描、工具执行、作业转码、隔离与清空、未捕获的 panic 都会记录。
 
 ## 性能
+
 
 实测：30 张 4000×3000 JPEG（共 17 MB），冷扫耗时。
 

@@ -27,7 +27,17 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "vitoice",
+    "shortDescription": "素材去重与整理",
+    "longDescription": "VitoiceCompare 是本地视频/图片/音频素材的去重与整理工具，提供 14 个工具：查重、相似画面、重复音频、清理与优化。",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese"]
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

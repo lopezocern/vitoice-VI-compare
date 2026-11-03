@@ -136,7 +136,6 @@ fn hamming_tol() -> u32 {
             .clamp(4, 32)
     })
 }
-const HAMMING_TOL: u32 = 12;
 const MAX_OFFSET: isize = 4;
 
 #[derive(Clone, Copy)]
