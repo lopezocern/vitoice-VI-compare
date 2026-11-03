@@ -25,17 +25,66 @@ pub struct Extracted {
     pub times: Vec<f32>,
 }
 
+/// 带超时地运行子进程，避免坏文件把 ffmpeg 卡死导致整个扫描僵住
+pub fn output_timeout(mut cmd: std::process::Command, secs: u64) -> Result<std::process::Output, String> {
+    output_timeout_cancel(cmd, secs, None)
+}
+
+/// 额外支持「外部取消」：点了停止就立刻杀掉正在跑的 ffmpeg，不必等当前文件处理完
+pub fn output_timeout_cancel(
+    mut cmd: std::process::Command,
+    secs: u64,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<std::process::Output, String> {
+    use std::io::Read;
+
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| format!("无法启动 ffmpeg: {e}"))?;
+    let started = std::time::Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut stdout = Vec::new();
+                let mut stderr = Vec::new();
+                if let Some(mut s) = child.stdout.take() {
+                    let _ = s.read_to_end(&mut stdout);
+                }
+                if let Some(mut s) = child.stderr.take() {
+                    let _ = s.read_to_end(&mut stderr);
+                }
+                return Ok(std::process::Output { status, stdout, stderr });
+            }
+            Ok(None) => {
+                if started.elapsed().as_secs() >= secs {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("处理超时（{secs} 秒），已终止"));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("等待进程失败: {e}")),
+        }
+    }
+}
+
 pub fn probe(path: &Path) -> Result<Probe, String> {
-    let out = crate::media::cmd("ffprobe")
-        .args([
-            "-v", "quiet",
-            "-print_format", "json",
-            "-show_streams",
-            "-show_format",
-        ])
-        .arg(path)
-        .output()
-        .map_err(|e| format!("ffprobe 无法启动: {e}"))?;
+    let out = output_timeout(
+        {
+            let mut c = crate::media::cmd("ffprobe");
+            c.args([
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_streams",
+                "-show_format",
+            ]);
+            c.arg(path);
+            c
+        },
+        30,
+    )?;
 
     if !out.status.success() {
         return Err("ffprobe 解析失败".to_string());
@@ -144,6 +193,7 @@ pub fn extract(
     min_frames: usize,
     max_frames: usize,
     sec_per_frame: f32,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<Extracted, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("创建缓存目录失败: {e}"))?;
 
@@ -166,18 +216,23 @@ pub fn extract(
          [0:v]fps={fps:.6},scale=32:32,format=gray[raw]"
     );
 
-    let status = crate::media::cmd("ffmpeg")
-        .args(["-hide_banner", "-loglevel", "error", "-y"])
-        .args(["-threads", "2"])
-        .arg("-i")
-        .arg(input)
-        .args(["-filter_complex", &filter])
-        .args(["-map", "[jpg]", "-q:v", "5"])
-        .arg(&jpg_pat)
-        .args(["-map", "[raw]", "-f", "rawvideo", "-pix_fmt", "gray"])
-        .arg(&raw_path)
-        .output()
-        .map_err(|e| format!("ffmpeg 无法启动: {e}"))?;
+    let status = output_timeout_cancel(
+        {
+            let mut c = crate::media::cmd("ffmpeg");
+            c.args(["-hide_banner", "-loglevel", "error", "-y"])
+                .args(["-threads", "2"])
+                .arg("-i")
+                .arg(input)
+                .args(["-filter_complex", &filter])
+                .args(["-map", "[jpg]", "-q:v", "5"])
+                .arg(&jpg_pat)
+                .args(["-map", "[raw]", "-f", "rawvideo", "-pix_fmt", "gray"])
+                .arg(&raw_path);
+            c
+        },
+        180,
+        cancel,
+    )?;
 
     if !status.status.success() {
         let msg = String::from_utf8_lossy(&status.stderr);

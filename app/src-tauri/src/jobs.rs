@@ -146,11 +146,15 @@ fn unique_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
     p
 }
 
-fn run_ffmpeg(args: &[String]) -> Result<(), String> {
-    let out = crate::media::cmd("ffmpeg")
-        .args(args)
-        .output()
-        .map_err(|e| format!("ffmpeg 无法启动: {e}"))?;
+fn run_ffmpeg(args: &[String], timeout_secs: u64) -> Result<(), String> {
+    let out = crate::media::output_timeout(
+        {
+            let mut c = crate::media::cmd("ffmpeg");
+            c.args(args);
+            c
+        },
+        timeout_secs,
+    )?;
     if out.status.success() {
         Ok(())
     } else {
@@ -272,7 +276,7 @@ pub fn run(
                 (d, a)
             };
 
-            match run_ffmpeg(&args) {
+            match run_ffmpeg(&args, if tool == "video-optimizer" { 3600 } else { 120 }) {
                 Ok(_) => {
                     let out_bytes = std::fs::metadata(&dst).map(|m| m.len()).unwrap_or(0);
                     entries.push(ManifestEntry {

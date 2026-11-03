@@ -1,4 +1,4 @@
-﻿use crate::model::Item;
+use crate::model::Item;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::{Path, PathBuf};
@@ -294,12 +294,16 @@ fn broken_files(roots: &[PathBuf], excludes: &[String], recursive: bool, cancel:
         let ok = if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif") {
             std::fs::File::open(&p).is_ok()
         } else {
-            crate::media::cmd("ffprobe")
-                .args(["-v", "quiet", "-show_format"])
-                .arg(&p)
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
+            crate::media::output_timeout(
+                {
+                    let mut c = crate::media::cmd("ffprobe");
+                    c.args(["-v", "quiet", "-show_format"]).arg(&p);
+                    c
+                },
+                30,
+            )
+            .map(|o| o.status.success())
+            .unwrap_or(false)
         };
         if !ok {
             out.push(item(&p, "无法解析 / 已损坏".to_string(), "broken"));

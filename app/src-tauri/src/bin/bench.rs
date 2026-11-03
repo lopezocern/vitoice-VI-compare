@@ -53,7 +53,7 @@ fn main() {
             }
         };
         let out = tmp.join(format!("f{i}"));
-        let ex = match media::extract(f, &out, probe.duration, 8, 48, 2.0) {
+        let ex = match media::extract(f, &out, probe.duration, 8, 48, 2.0, None) {
             Ok(x) => x,
             Err(e) => {
                 eprintln!("  跳过 {name}: {e}");

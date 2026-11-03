@@ -1,4 +1,4 @@
-﻿use crate::model::Item;
+use crate::model::Item;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -60,12 +60,17 @@ pub fn collect(roots: &[PathBuf], excludes: &[String], recursive: bool) -> Vec<P
 
 /// 解码成 8k 单声道，按 0.25s 窗口取 RMS 包络
 pub fn fingerprint(path: &Path) -> Option<AudioFp> {
-    let out = crate::media::cmd("ffmpeg")
-        .args(["-hide_banner", "-loglevel", "error", "-i"])
-        .arg(path)
-        .args(["-map", "a:0", "-ac", "1", "-ar", &RATE.to_string(), "-f", "s16le", "-"])
-        .output()
-        .ok()?;
+    let out = crate::media::output_timeout(
+        {
+            let mut c = crate::media::cmd("ffmpeg");
+            c.args(["-hide_banner", "-loglevel", "error", "-i"])
+                .arg(path)
+                .args(["-map", "a:0", "-ac", "1", "-ar", &RATE.to_string(), "-f", "s16le", "-"]);
+            c
+        },
+        120,
+    )
+    .ok()?;
 
     if !out.status.success() || out.stdout.len() < WIN * 2 * 8 {
         return None;

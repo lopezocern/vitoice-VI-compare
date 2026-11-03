@@ -408,6 +408,9 @@ fn dev_flags() -> serde_json::Value {
         "purge": std::env::var("VIDEOCC_PURGE").ok(),
         "open_trash": std::env::var("VIDEOCC_OPEN_TRASH").is_ok(),
         "diag_keepall": std::env::var("VIDEOCC_DIAG_KEEPALL").is_ok(),
+        "diag_cancel_ms": std::env::var("VIDEOCC_DIAG_CANCEL").ok().and_then(|v| v.parse::<u64>().ok()),
+        "diag_flow": std::env::var("VIDEOCC_DIAG_FLOW").is_ok(),
+        "diag_close": std::env::var("VIDEOCC_DIAG_CLOSE").is_ok(),
         "compare": std::env::var("VIDEOCC_COMPARE").is_ok(),
         "diag_switch": std::env::var("VIDEOCC_DIAG_SWITCH").is_ok(),
         "job_tool": std::env::var("VIDEOCC_JOB_TOOL").ok(),
@@ -422,7 +425,7 @@ fn worker_count() -> usize {
     config::workers()
 }
 
-fn process_one(file: &Path) -> Option<VideoRecord> {
+fn process_one(file: &Path, cancel: &AtomicBool) -> Option<VideoRecord> {
     let dir = thumb_root().join(scanner::path_key(file));
 
     if let Some(c) = cache::load(&dir, file) {
@@ -442,7 +445,7 @@ fn process_one(file: &Path) -> Option<VideoRecord> {
     }
 
     let meta = media::probe(file).ok()?;
-    let ex = media::extract(file, &dir, meta.duration, 8, 48, 2.0).ok()?;
+    let ex = media::extract(file, &dir, meta.duration, 8, 48, 2.0, Some(cancel)).ok()?;
 
     let names: Vec<String> = ex
         .frames
@@ -509,7 +512,7 @@ fn spawn_scan(app2: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, recur
                     if i >= files.len() || cancel.load(Ordering::Relaxed) {
                         break;
                     }
-                    if let Some(rec) = process_one(&files[i]) {
+                    if let Some(rec) = process_one(&files[i], &cancel) {
                         let _ = tx.send((i, rec));
                     }
                     done.fetch_add(1, Ordering::Relaxed);
