@@ -3,6 +3,7 @@ mod cache;
 mod config;
 mod images;
 mod jobs;
+mod logging;
 pub mod media;
 mod model;
 pub mod scanner;
@@ -347,6 +348,17 @@ fn open_path(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_logs() -> Result<String, String> {
+    let dir = crate::logging::log_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建日志目录失败: {e}"))?;
+    crate::media::cmd("explorer")
+        .arg(dir.to_string_lossy().to_string())
+        .spawn()
+        .map_err(|e| format!("无法打开资源管理器: {e}"))?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
@@ -456,6 +468,7 @@ fn process_one(file: &Path) -> Option<VideoRecord> {
 
 fn spawn_scan(app2: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, recursive: bool, sim: u8, cancel: Arc<AtomicBool>) {
     std::thread::spawn(move || {
+        crate::logging::log("[scan] thread start");
         let started = Instant::now();
 
         let files = scanner::collect_videos_scoped(&roots, &excludes, recursive);
@@ -557,14 +570,14 @@ fn spawn_scan(app2: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, recur
             },
         );
 
-        eprintln!(
+        crate::logging::log(&format!(
             "[scan] files={} groups={} matched={} elapsed={:.1}s workers={}",
             total,
             groups.len(),
             matched_files,
             started.elapsed().as_secs_f64(),
             workers
-        );
+        ));
     });
 }
 
@@ -599,12 +612,12 @@ fn spawn_tool_scan(app: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, r
             }),
         );
 
-        eprintln!(
+        crate::logging::log(&format!(
             "[tool] {} items={} elapsed={:.1}s",
             tool,
             items.len(),
             started.elapsed().as_secs_f64()
-        );
+        ));
     });
 }
 
@@ -715,13 +728,13 @@ fn spawn_image_scan(
             },
         );
 
-        eprintln!(
+        crate::logging::log(&format!(
             "[images] files={} groups={} matched={} elapsed={:.1}s",
             total,
             groups.len(),
             matched,
             started.elapsed().as_secs_f64()
-        );
+        ));
     });
 }
 
@@ -752,6 +765,13 @@ fn scan_start_scope(
     state.cancel.store(false, Ordering::SeqCst);
 
     let recursive = recursive.unwrap_or(true);
+    crate::logging::log(&format!(
+        "[scan] start tool={} sim={:?} roots={} recursive={}",
+        tool.clone().unwrap_or_else(|| "similar-videos".into()),
+        sim,
+        includes.len(),
+        recursive
+    ));
     let roots: Vec<PathBuf> = includes
         .iter()
         .map(PathBuf::from)
@@ -995,6 +1015,7 @@ fn trash_files(
     paths: Vec<String>,
 ) -> Result<serde_json::Value, String> {
     let (batch, moved, bytes) = trash_core(&paths, &state.trashed);
+    crate::logging::log(&format!("[trash] batch={batch} moved={moved} bytes={bytes}"));
     Ok(serde_json::json!({
         "batch": batch,
         "moved": moved,
@@ -1020,6 +1041,7 @@ fn purge_batch(batch: String) -> Result<serde_json::Value, String> {
     }
     let bytes = dir_size(&dir);
     std::fs::remove_dir_all(&dir).map_err(|e| format!("删除失败: {e}"))?;
+    crate::logging::log(&format!("[purge] batch={batch} bytes={bytes}"));
     Ok(serde_json::json!({ "bytes": bytes }))
 }
 
@@ -1039,6 +1061,7 @@ fn purge_all() -> Result<serde_json::Value, String> {
             }
         }
     }
+    crate::logging::log(&format!("[purge-all] batches={files} bytes={bytes}"));
     Ok(serde_json::json!({ "batches": files, "bytes": bytes }))
 }
 
@@ -1126,6 +1149,7 @@ fn open_in_explorer(path: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    logging::init();
     tauri::Builder::default()
         .manage(AppState {
             records: Mutex::new(Vec::new()),
@@ -1156,9 +1180,9 @@ pub fn run() {
                 let listed = !trash_root().join(&batch).join("manifest.json").exists();
                 let restored = undo_core(&batch, &st.trashed);
                 let back = paths.iter().all(|p| PathBuf::from(p).exists());
-                eprintln!(
+                crate::logging::log(&format!(
                     "[selftest] moved={moved} bytes={bytes} gone={gone} manifest_missing={listed} restored={restored} back={back}"
-                );
+                ));
                 let _ = std::fs::remove_dir_all(&tmp);
             }
 
@@ -1174,7 +1198,7 @@ pub fn run() {
                     let sim = std::env::var("VIDEOCC_SIM")
                         .ok()
                         .and_then(|v| v.parse::<u8>().ok())
-                        .unwrap_or(90);
+                        .unwrap_or_else(|| crate::config::default_sim());
                     let tool = std::env::var("VIDEOCC_TOOL")
                         .unwrap_or_else(|_| "similar-videos".to_string());
                     if let Ok(mut t) = st.tool.lock() {
@@ -1183,7 +1207,7 @@ pub fn run() {
                     if tool == "similar-videos" {
                         spawn_scan(app.handle().clone(), vec![path], Vec::new(), true, sim, cancel);
                     } else if tool == "similar-images" {
-                        spawn_image_scan(app.handle().clone(), vec![path], Vec::new(), true, 90, cancel);
+                        spawn_image_scan(app.handle().clone(), vec![path], Vec::new(), true, crate::config::default_sim(), cancel);
                     } else {
                         spawn_tool_scan(app.handle().clone(), vec![path], Vec::new(), true, tool, cancel);
                     }
@@ -1221,6 +1245,7 @@ pub fn run() {
             cache_stats,
             clear_cache,
             open_path,
+            open_logs,
             file_data_url,
             frame_data_url,
             purge_batch,

@@ -1,4 +1,4 @@
-﻿use crate::config;
+use crate::config;
 use crate::images;
 use crate::scanner;
 use serde::{Deserialize, Serialize};
@@ -317,14 +317,17 @@ pub fn run(
             }),
         );
 
-        eprintln!(
+        crate::logging::log(&format!(
             "[job] {} preset={} ok={} failed={} elapsed={:.1}s",
             tool,
             preset,
             entries.len(),
             failed.len(),
             started.elapsed().as_secs_f64()
-        );
+        ));
+        for e in failed.iter().take(10) {
+            crate::logging::error(&format!("[job] {e}"));
+        }
     });
 }
 

@@ -569,6 +569,13 @@
             <button class="btn ghost" id="openTrashDir">打开</button>
           </div>
         </div>
+        <div class="set-row">
+          <label>运行日志</label>
+          <div class="set-cache">
+            <span id="logInfo">%LOCALAPPDATA%\VitoiceCompare\logs</span>
+            <button class="btn ghost" id="openLogs">打开</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="sheet-foot">
@@ -2214,6 +2221,9 @@ async function boot(){
       };
       document.getElementById("openCache").onclick = ()=> TAURI.core.invoke("open_path", { path: document.getElementById("cfgCache").value.trim() });
       document.getElementById("openTrashDir").onclick = ()=> TAURI.core.invoke("open_path", { path: document.getElementById("cfgTrash").value.trim() });
+      document.getElementById("openLogs").onclick = async ()=>{
+        try { await TAURI.core.invoke("open_logs"); } catch (e) { toast("打开日志失败：" + e); }
+      };
       document.getElementById("openTrash").onclick = ()=> TAURI.core.invoke("open_path", { path: document.getElementById("cfgTrash").value.trim() });
       document.getElementById("pickCache").onclick = async ()=>{
         const p = await TAURI.core.invoke("pick_folders");

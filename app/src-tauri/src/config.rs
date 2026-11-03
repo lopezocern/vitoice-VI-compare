@@ -25,9 +25,13 @@ impl Default for AppConfig {
     }
 }
 
+pub fn data_root() -> PathBuf {
+    root_dir()
+}
+
 fn root_dir() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join("VideoCC")
+    PathBuf::from(base).join("VitoiceCompare")
 }
 
 fn config_path() -> PathBuf {

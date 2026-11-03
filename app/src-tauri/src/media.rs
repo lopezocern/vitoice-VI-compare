@@ -210,3 +210,68 @@ pub fn extract(
 pub fn hamming(a: u64, b: u64) -> u32 {
     (a ^ b).count_ones()
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hamming(a: u64, b: u64) -> u32 {
+        (a ^ b).count_ones()
+    }
+
+    /// 类似真实画面的图案：两个方向的正弦叠加 + 一个亮斑
+    fn picture(px_shift: f32, bright: i32) -> Vec<u8> {
+        (0..32 * 32)
+            .map(|i| {
+                let x = (i % 32) as f32;
+                let y = (i / 32) as f32;
+                let mut v = 120.0
+                    + (x * 0.31 + px_shift).sin() * 45.0
+                    + (y * 0.22).cos() * 30.0;
+                let d = ((x - 16.0).powi(2) + (y - 16.0).powi(2)).sqrt();
+                if d < 8.0 {
+                    v += bright as f32;
+                }
+                v.clamp(0.0, 255.0) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn phash_is_deterministic() {
+        let g = picture(0.0, 60);
+        assert_eq!(phash64(&g), phash64(&g));
+    }
+
+    #[test]
+    fn phash_survives_compression_noise() {
+        let a = picture(0.4, 55);
+        // 模拟压缩噪声：±6 灰度抖动 + 轻微亮度偏移
+        let b: Vec<u8> = a
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let n = ((i * 37) % 13) as i32 - 6;
+                (*v as i32 + n + 3).clamp(0, 255) as u8
+            })
+            .collect();
+        let d = hamming(phash64(&a), phash64(&b));
+        assert!(d <= 12, "压缩噪声下的 pHash 距离应很小，实际 {d}");
+    }
+
+    #[test]
+    fn phash_separates_different_pictures() {
+        let a = picture(0.0, 70);
+        let b = picture(2.2, -50);
+        let d = hamming(phash64(&a), phash64(&b));
+        assert!(d >= 12, "不同画面应相差较多位，实际 {d}");
+    }
+
+    #[test]
+    fn hamming_counts_differing_bits() {
+        assert_eq!(hamming(0, 0), 0);
+        assert_eq!(hamming(0b1011, 0b0010), 2);
+        assert_eq!(hamming(u64::MAX, 0), 64);
+    }
+}

@@ -333,3 +333,84 @@ pub fn evidence_for(a: &[u64], b: &[u64]) -> Score {
 }
 
 
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// splitmix64：生成互相独立的伪随机哈希，避免测试数据自带结构
+    fn mix(mut z: u64) -> u64 {
+        z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn series(seed: u64, n: usize) -> Vec<u64> {
+        (0..n).map(|i| mix(seed ^ (i as u64))).collect()
+    }
+
+    fn rec(dur: f32, hashes: Vec<u64>) -> VideoRecord {
+        VideoRecord {
+            path: PathBuf::from("x.mp4"),
+            meta: media::Probe {
+                width: 0,
+                height: 0,
+                duration: dur,
+                bitrate: 0,
+                size: 0,
+            },
+            hashes,
+            frames: Vec::new(),
+            times: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn identical_hashes_score_full() {
+        let h = series(7919, 12);
+        let s = score_with_tol(&h, &h, 16);
+        assert_eq!(s.matched, s.total);
+        assert_eq!(s.longest_run, s.total);
+    }
+
+    #[test]
+    fn score_tolerates_frame_shift() {
+        let a = series(104729, 20);
+        let mut b = vec![0u64; 3];
+        b.extend(a.clone());
+        let s = score_with_tol(&a, &b, 16);
+        let rate = s.matched as f32 / s.total as f32;
+        assert!(rate > 0.95, "错开 3 帧应仍能对齐，实际匹配率 {rate}");
+    }
+
+    #[test]
+    fn unrelated_hashes_score_low() {
+        let a = series(0x9E37_79B9, 20);
+        let b = series(0xD6E8_FEB8, 20);
+        let s = score_with_tol(&a, &b, 20);
+        let rate = s.matched as f32 / s.total as f32;
+        assert!(rate < 0.2, "无关素材匹配率应接近 0，实际 {rate}");
+    }
+
+    #[test]
+    fn groups_merge_same_source_only() {
+        let base = series(31337, 10);
+        let mut near = base.clone();
+        near[0] ^= 0x0F; // 4 位扰动，远小于容差
+        let other = series(0xDEAD_BEEF, 10);
+
+        let recs = vec![rec(10.0, base.clone()), rec(10.0, near), rec(10.0, other)];
+        let groups = group_records(&recs, 85);
+        assert_eq!(groups.len(), 1, "应只有一组");
+        assert_eq!(groups[0].0, vec![0, 1], "同源两段应合并，第三段不参与");
+    }
+
+    #[test]
+    fn groups_ignore_duration_mismatch() {
+        let h = series(555, 10);
+        let recs = vec![rec(10.0, h.clone()), rec(60.0, h)];
+        assert!(group_records(&recs, 85).is_empty(), "时长差 6 倍不应判为同一段");
+    }
+}
