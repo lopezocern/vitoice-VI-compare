@@ -410,6 +410,7 @@ fn dev_flags() -> serde_json::Value {
         "diag_keepall": std::env::var("VIDEOCC_DIAG_KEEPALL").is_ok(),
         "diag_cancel_ms": std::env::var("VIDEOCC_DIAG_CANCEL").ok().and_then(|v| v.parse::<u64>().ok()),
         "diag_flow": std::env::var("VIDEOCC_DIAG_FLOW").is_ok(),
+        "diag_sel": std::env::var("VIDEOCC_DIAG_SEL").is_ok(),
         "diag_close": std::env::var("VIDEOCC_DIAG_CLOSE").is_ok(),
         "compare": std::env::var("VIDEOCC_COMPARE").is_ok(),
         "diag_switch": std::env::var("VIDEOCC_DIAG_SWITCH").is_ok(),

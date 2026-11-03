@@ -721,7 +721,7 @@ function applySort(){
       ? (a,b)=> (b.total_bytes||0)-(a.total_bytes||0) || b.sim-a.sim
       : (a,b)=> b.sim-a.sim || (b.file_count||0)-(a.file_count||0));
   VIEW = filtered;
-  if (cur >= VIEW.length) cur = 0;
+  if (cur < 0 || cur >= VIEW.length) cur = pickVisible(0);
 }
 const totalDel = () => GROUPS.reduce((s,g)=>s + (g.files ? g.files.filter(f=>!f.keep).length : 0), 0);
 
@@ -1424,11 +1424,24 @@ function resetKeepState(){
   KEEP_BY_PATH.clear();
 }
 
-function stepGroup(from, dir){
-  for (let i = from + dir; i >= 0 && i < VIEW.length; i += dir) {
+/// 返回从 from 起（含）第一个可见分组的索引，找不到则从头再找，都没有返回 -1
+function pickVisible(from){
+  const start = Math.max(0, from | 0);
+  for (let i = start; i < VIEW.length; i++) {
     if (!isGroupHidden(VIEW[i])) return i;
   }
-  return from;
+  for (let i = 0; i < start && i < VIEW.length; i++) {
+    if (!isGroupHidden(VIEW[i])) return i;
+  }
+  return -1;
+}
+
+function stepGroup(from, dir){
+  const begin = from < 0 ? (dir > 0 ? -1 : VIEW.length) : from;
+  for (let i = begin + dir; i >= 0 && i < VIEW.length; i += dir) {
+    if (!isGroupHidden(VIEW[i])) return i;
+  }
+  return from >= 0 ? from : pickVisible(0);
 }
 
 function syncKeptChip(){
@@ -1756,15 +1769,8 @@ document.getElementById("btnKeepAll").onclick = async ()=>{
     renderDetail();
 
     const idx = VIEW.findIndex(x=>x.id === g.id);
-    let nextIdx = -1;
-    for (let i = idx + 1; i < VIEW.length; i++) {
-      if (!isGroupHidden(VIEW[i])) { nextIdx = i; break; }
-    }
-    if (nextIdx < 0) {
-      for (let i = 0; i < VIEW.length; i++) {
-        if (i !== idx && !isGroupHidden(VIEW[i])) { nextIdx = i; break; }
-      }
-    }
+    let nextIdx = pickVisible(idx + 1);
+    if (nextIdx === idx) nextIdx = pickVisible(0);
 
     if (nextIdx >= 0) {
       cur = nextIdx;
@@ -1797,12 +1803,23 @@ document.getElementById("btnMark").onclick = async ()=>{
     const dels = g.files.filter(f=>!f.keep && f.path);
     if(!dels.length) return toast("本组没有待删除文件");
     if (!(TAURI && TAURI.core)) return toast("浏览器预览模式不支持删除");
+    const at = cur;
     const r = await TAURI.core.invoke("trash_files", { paths: dels.map(f=>f.path) });
     lastBatch = r.batch;
     KEPT_GROUP_IDS.delete(g.id);
     dels.forEach(f=>{ if (f.path) KEEP_BY_PATH.delete(f.path); });
     toast(`已隔离 ${r.moved} 个文件 · ${(r.bytes/1048576).toFixed(1)} MB`);
     await loadResult();
+    // 处理完停在同一位置的下一个可见组，而不是被隐藏的组
+    if (VIEW.length) {
+      const idx = pickVisible(at);
+      if (idx >= 0 && idx !== cur) {
+        cur = idx;
+        renderGroups();
+        await ensureDetail(cur);
+        renderDetail();
+      }
+    }
     refreshTrashCount();
   });
 };
@@ -2127,7 +2144,6 @@ async function loadGroups(){
     id: g.id, sim: g.sim, covers: g.covers, names: g.names || [],
     file_count: g.file_count, total_bytes: g.total_bytes
   }));
-  cur = 0;
   applySort();
   renderGroups();
 
@@ -2137,10 +2153,14 @@ async function loadGroups(){
   document.getElementById("headStats").textContent = `${GROUPS.length} 组 · ${totalFiles} 个文件`;
   document.getElementById("listCount").textContent = `${VIEW.length} / ${GROUPS.length}`;
 
-  if (GROUPS.length) {
-    await ensureDetail(0);
+  const idx = pickVisible(0);
+  if (idx >= 0) {
+    cur = idx;
+    renderGroups();
+    await ensureDetail(cur);
     renderDetail();
   } else {
+    cur = -1;
     clearDetail();
   }
   return GROUPS.length > 0;
