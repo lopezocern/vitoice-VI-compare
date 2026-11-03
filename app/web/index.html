@@ -696,7 +696,7 @@ function syncListFooter(){
 
 async function loadResult(){
   if (!(TAURI && TAURI.core)) return false;
-  const items = await TAURI.core.invoke("get_items");
+  const items = await TAURI.core.invoke("get_items", { tool: currentTool });
   if (Array.isArray(items) && items.length) {
     ITEMS = items;
     selected.clear();
@@ -747,11 +747,7 @@ function renderRail(items){
       document.querySelector(".toolname").textContent = meta ? meta.name : "";
       if (JOB_TOOLS.indexOf(id) >= 0) { jobEnter(id); return; }
       jobExit();
-      if (SCOPE.includes.length) scanScope();
-      else {
-        document.getElementById("pop").classList.add("on");
-        toast(`已切到「${meta ? meta.name : id}」，先选扫描范围`);
-      }
+      switchTool(id, meta);
     };
   });
 }
@@ -1050,6 +1046,36 @@ function openAbout(){
   }
   document.getElementById("modalAbout").classList.add("on");
 }
+/* ---------------- 工具切换 ---------------- */
+async function switchTool(id, meta){
+  if (!(TAURI && TAURI.core)) { await loadResult(); return; }
+
+  let has = false;
+  try {
+    has = await TAURI.core.invoke("has_result", { tool: id });
+  } catch (e) {
+    console.error("has_result", e);
+  }
+
+  if (has) {
+    // 复用该工具上次的扫描结果，不重新扫
+    await loadResult();
+    if (!VIEW.length && !ITEMS.length) {
+      // 结果为空（可能是旧范围），提示用户手动重扫
+    } else {
+      toast(`已切换到「${meta ? meta.name : id}」，使用上次结果`);
+      return;
+    }
+  }
+
+  if (SCOPE.includes.length) {
+    await scanScope();
+  } else {
+    document.getElementById("pop").classList.add("on");
+    toast(`已切到「${meta ? meta.name : id}」，先选扫描范围`);
+  }
+}
+
 /* ---------------- 大图 / 放大预览 ---------------- */
 let LB = { scale: 1, x: 0, y: 0, dx: 0, dy: 0, dragging: false };
 
@@ -1486,7 +1512,7 @@ async function ensureDetail(i){
   const g = VIEW[i] || GROUPS[i];
   if (!g || g.files) return g;
   if (!(TAURI && TAURI.core)) return g;
-  const d = await TAURI.core.invoke("group_detail", { id: g.id });
+  const d = await TAURI.core.invoke("group_detail", { id: g.id, tool: currentTool });
   g.files = (d.files || []).map(f=>({
     n: f.name,
     path: f.path,
@@ -1732,11 +1758,11 @@ document.getElementById("btnKeepAll").onclick = async ()=>{
     const idx = VIEW.findIndex(x=>x.id === g.id);
     let nextIdx = -1;
     for (let i = idx + 1; i < VIEW.length; i++) {
-      if (!groupAllKept(VIEW[i])) { nextIdx = i; break; }
+      if (!isGroupHidden(VIEW[i])) { nextIdx = i; break; }
     }
     if (nextIdx < 0) {
       for (let i = 0; i < VIEW.length; i++) {
-        if (i !== idx && !groupAllKept(VIEW[i])) { nextIdx = i; break; }
+        if (i !== idx && !isGroupHidden(VIEW[i])) { nextIdx = i; break; }
       }
     }
 
@@ -2095,7 +2121,7 @@ window.addEventListener("unhandledrejection", (e)=>{
 
 async function loadGroups(){
   if (!(TAURI && TAURI.core)) return false;
-  const gs = await TAURI.core.invoke("get_groups");
+  const gs = await TAURI.core.invoke("get_groups", { tool: currentTool });
   if (!Array.isArray(gs)) return false;
   GROUPS = gs.map(g=>({
     id: g.id, sim: g.sim, covers: g.covers, names: g.names || [],

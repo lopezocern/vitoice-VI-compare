@@ -12,6 +12,7 @@ fn is_reserved(p: &std::path::Path) -> bool {
 }
 
 
+#[derive(Clone)]
 pub struct VideoRecord {
     pub path: PathBuf,
     pub meta: Probe,

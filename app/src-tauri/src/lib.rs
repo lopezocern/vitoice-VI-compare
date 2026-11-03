@@ -18,10 +18,19 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+/// 一次扫描的完整结果，按工具分别保存，切换工具时直接复用
+#[derive(Default, Clone)]
+pub struct ToolSnapshot {
+    pub records: Vec<VideoRecord>,
+    pub groups: Vec<(Vec<usize>, u8)>,
+    pub items: Vec<Item>,
+    /// 产生这份结果时的扫描范围签名
+    pub sig: String,
+}
+
 pub struct AppState {
-    records: Mutex<Vec<VideoRecord>>,
-    groups: Mutex<Vec<(Vec<usize>, u8)>>,
-    items: Mutex<Vec<Item>>,
+    results: Mutex<std::collections::HashMap<String, ToolSnapshot>>,
+    scope_sig: Mutex<String>,
     tool: Mutex<String>,
     trashed: Mutex<std::collections::HashSet<String>>,
     scanning: AtomicBool,
@@ -400,6 +409,7 @@ fn dev_flags() -> serde_json::Value {
         "open_trash": std::env::var("VIDEOCC_OPEN_TRASH").is_ok(),
         "diag_keepall": std::env::var("VIDEOCC_DIAG_KEEPALL").is_ok(),
         "compare": std::env::var("VIDEOCC_COMPARE").is_ok(),
+        "diag_switch": std::env::var("VIDEOCC_DIAG_SWITCH").is_ok(),
         "job_tool": std::env::var("VIDEOCC_JOB_TOOL").ok(),
         "job_start": std::env::var("VIDEOCC_JOB_START").is_ok(),
         "scope_hint": scope_hint,
@@ -552,11 +562,15 @@ fn spawn_scan(app2: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, recur
         let groups = scanner::group_records(&records, sim);
         let matched_files: usize = groups.iter().map(|(m, _)| m.len()).sum();
 
-        if let Ok(mut g) = app2.state::<AppState>().groups.lock() {
-            *g = groups.clone();
+        let st2 = app2.state::<AppState>();
+        if let Ok(mut m) = st2.results.lock() {
+            m.insert(
+                "similar-videos".to_string(),
+                ToolSnapshot { records: records.clone(), groups: groups.clone(), items: Vec::new(), sig: sig_now(&st2) },
+            );
         }
-        if let Ok(mut r) = app2.state::<AppState>().records.lock() {
-            *r = records;
+        if let Ok(mut t) = st2.tool.lock() {
+            *t = "similar-videos".to_string();
         }
         app2.state::<AppState>().scanning.store(false, Ordering::SeqCst);
 
@@ -590,11 +604,11 @@ fn spawn_tool_scan(app: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, r
             tools::run(&tool, &roots, &excludes, recursive, &cancel)
         };
         let st = app.state::<AppState>();
-        if let Ok(mut v) = st.items.lock() {
-            *v = items.clone();
-        }
-        if let Ok(mut g) = st.groups.lock() {
-            *g = Vec::new();
+        if let Ok(mut m) = st.results.lock() {
+            m.insert(
+                tool.clone(),
+                ToolSnapshot { records: Vec::new(), groups: Vec::new(), items: items.clone(), sig: sig_now(&st) },
+            );
         }
         if let Ok(mut t) = st.tool.lock() {
             *t = tool.clone();
@@ -707,14 +721,14 @@ fn spawn_image_scan(
         let matched: usize = groups.iter().map(|(m, _)| m.len()).sum();
 
         let st = app.state::<AppState>();
-        if let Ok(mut g) = st.groups.lock() {
-            *g = groups.clone();
+        if let Ok(mut m) = st.results.lock() {
+            m.insert(
+                "similar-images".to_string(),
+                ToolSnapshot { records: records.clone(), groups: groups.clone(), items: Vec::new(), sig: sig_now(&st) },
+            );
         }
-        if let Ok(mut r) = st.records.lock() {
-            *r = records;
-        }
-        if let Ok(mut v) = st.items.lock() {
-            v.clear();
+        if let Ok(mut t) = st.tool.lock() {
+            *t = "similar-images".to_string();
         }
         st.scanning.store(false, Ordering::SeqCst);
 
@@ -792,13 +806,16 @@ fn scan_start_scope(
     if let Ok(mut t) = state.tool.lock() {
         *t = tool.clone();
     }
-    if let Ok(mut v) = state.items.lock() {
-        v.clear();
+
+    // 记录本次范围；旧工具的 result 是否过期由 has_result 按签名判断
+    let sig = format!("{includes:?}|{excludes:?}|{recursive}");
+    if let Ok(mut s) = state.scope_sig.lock() {
+        *s = sig;
     }
 
     if tool == "similar-images" {
         let cancel = state.cancel.clone();
-        spawn_image_scan(app, roots, excludes, recursive, 90, cancel);
+        spawn_image_scan(app, roots, excludes, recursive, crate::config::default_sim(), cancel);
         return Ok(());
     }
 
@@ -830,9 +847,45 @@ fn check_paths(paths: Vec<String>) -> Vec<bool> {
     paths.iter().map(|p| PathBuf::from(p).is_dir()).collect()
 }
 
+/// 工具 id → 快照，缺省用当前工具
+fn snapshot_of(state: &AppState, tool: Option<String>) -> ToolSnapshot {
+    let key = tool.unwrap_or_else(|| {
+        state
+            .tool
+            .lock()
+            .map(|t| t.clone())
+            .unwrap_or_else(|_| "similar-videos".to_string())
+    });
+    state
+        .results
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&key).cloned())
+        .unwrap_or_default()
+}
+
+/// 某工具是否已经有扫描结果
+fn sig_now(state: &AppState) -> String {
+    state
+        .scope_sig
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default()
+}
+
 #[tauri::command]
-fn get_items(state: State<'_, AppState>) -> Vec<Item> {
-    state.items.lock().map(|v| v.clone()).unwrap_or_default()
+fn has_result(state: State<'_, AppState>, tool: String) -> bool {
+    let cur = sig_now(&state);
+    state
+        .results
+        .lock()
+        .map(|m| m.get(&tool).map(|s| s.sig == cur).unwrap_or(false))
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn get_items(state: State<'_, AppState>, tool: Option<String>) -> Vec<Item> {
+    snapshot_of(&state, tool).items
 }
 
 #[tauri::command]
@@ -851,9 +904,10 @@ fn is_scanning(state: State<'_, AppState>) -> bool {
 }
 
 #[tauri::command]
-fn get_groups(state: State<'_, AppState>) -> Result<Vec<GroupSummary>, String> {
-    let groups = state.groups.lock().map_err(|_| "状态锁失败")?;
-    let records = state.records.lock().map_err(|_| "状态锁失败")?;
+fn get_groups(state: State<'_, AppState>, tool: Option<String>) -> Result<Vec<GroupSummary>, String> {
+    let snap = snapshot_of(&state, tool);
+    let groups = &snap.groups;
+    let records = &snap.records;
     let trashed = state.trashed.lock().map_err(|_| "状态锁失败")?;
 
     let alive_of = |members: &[usize]| -> Vec<usize> {
@@ -906,9 +960,10 @@ fn get_groups(state: State<'_, AppState>) -> Result<Vec<GroupSummary>, String> {
 }
 
 #[tauri::command]
-fn group_detail(state: State<'_, AppState>, id: u64) -> Result<GroupDetail, String> {
-    let groups = state.groups.lock().map_err(|_| "状态锁失败")?;
-    let records = state.records.lock().map_err(|_| "状态锁失败")?;
+fn group_detail(state: State<'_, AppState>, id: u64, tool: Option<String>) -> Result<GroupDetail, String> {
+    let snap = snapshot_of(&state, tool);
+    let groups = &snap.groups;
+    let records = &snap.records;
     let trashed = state.trashed.lock().map_err(|_| "状态锁失败")?;
 
     let (all_members, sim) = groups
@@ -1152,9 +1207,8 @@ pub fn run() {
     logging::init();
     tauri::Builder::default()
         .manage(AppState {
-            records: Mutex::new(Vec::new()),
-            groups: Mutex::new(Vec::new()),
-            items: Mutex::new(Vec::new()),
+            results: Mutex::new(std::collections::HashMap::new()),
+            scope_sig: Mutex::new(String::new()),
             tool: Mutex::new("similar-videos".to_string()),
             trashed: Mutex::new(std::collections::HashSet::new()),
             scanning: AtomicBool::new(false),
@@ -1204,6 +1258,15 @@ pub fn run() {
                     if let Ok(mut t) = st.tool.lock() {
                         *t = tool.clone();
                     }
+                    // 与 scan_start_scope 保持同一套范围签名，避免切换工具时误清结果
+                    if let Ok(mut s) = st.scope_sig.lock() {
+                        *s = format!(
+                            "{:?}|{:?}|{}",
+                            vec![path.to_string_lossy().to_string()],
+                            Vec::<String>::new(),
+                            true
+                        );
+                    }
                     if tool == "similar-videos" {
                         spawn_scan(app.handle().clone(), vec![path], Vec::new(), true, sim, cancel);
                     } else if tool == "similar-images" {
@@ -1228,6 +1291,7 @@ pub fn run() {
             scan_cancel,
             is_scanning,
             get_groups,
+            has_result,
             group_detail,
             get_items,
             get_tool,

@@ -10,6 +10,7 @@ pub fn cmd(program: &str) -> std::process::Command {
     }
     c
 }
+#[derive(Clone)]
 pub struct Probe {
     pub width: u32,
     pub height: u32,
