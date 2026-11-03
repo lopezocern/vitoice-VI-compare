@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VideoCC · 执行型工具设计</title>
+<style>
+  :root{
+    --bg:#0d0f13; --panel:#14171d; --panel2:#1a1e26; --line:#262b36;
+    --text:#e6e9ef; --muted:#8b93a5; --accent:#4c9aff;
+    --ok:#34d399; --warn:#fbbf24; --danger:#ff5f57;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;overflow:hidden}
+  button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+
+  .shell{display:flex;flex-direction:column;height:100vh}
+  .topbar{display:flex;align-items:center;gap:16px;height:52px;padding:0 16px;
+    border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:600}
+  .brand i{width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,#4c9aff,#7c5cff);display:block}
+  .brand small{color:var(--muted);font-weight:400;font-size:11px}
+  .spacer{flex:1}
+  .pill{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:2px 9px}
+  .btn{height:32px;padding:0 12px;border-radius:6px;background:var(--panel2);
+    border:1px solid var(--line);font-size:12px;transition:.15s}
+  .btn:hover{background:#20242e;border-color:#333a48}
+  .btn.ghost{background:none}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#06101f;font-weight:600}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.danger{background:rgba(255,95,87,.12);border-color:rgba(255,95,87,.35);color:#ff8e88}
+  .btn:disabled{opacity:.4;cursor:default}
+
+  main{display:flex;flex:1;min-height:0}
+  .rail{width:190px;flex:0 0 190px;border-right:1px solid var(--line);background:var(--panel);padding:10px 8px}
+  .rail-item{display:flex;align-items:center;gap:9px;height:30px;padding:0 10px;border-radius:6px;
+    color:#a7aebb;font-size:12.5px;cursor:pointer;transition:.12s}
+  .rail-item:hover{background:var(--panel2);color:var(--text)}
+  .rail-item.on{background:rgba(76,154,255,.14);color:#cfe3ff}
+
+  .stage{flex:1;min-width:0;display:flex;flex-direction:column;overflow:auto}
+
+  /* ---- config ---- */
+  .cfg{display:grid;grid-template-columns:1fr 360px;gap:18px;padding:18px 22px;align-items:start}
+  .h1{font-size:16px;font-weight:600;margin:0 0 4px}
+  .sub{font-size:11.5px;color:var(--muted);margin-bottom:16px}
+  .section-label{font-size:11px;color:var(--muted);letter-spacing:.04em;margin:18px 0 8px}
+  .presets{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .preset{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:12px 14px;
+    cursor:pointer;transition:.15s;position:relative}
+  .preset:hover{border-color:#333a48;background:#171b23}
+  .preset.on{border-color:rgba(76,154,255,.6);background:rgba(76,154,255,.08);
+    box-shadow:0 0 0 1px rgba(76,154,255,.25) inset}
+  .preset .nm{font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+  .preset .ds{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.6}
+  .preset .tag{font-size:10px;padding:1px 6px;border-radius:99px;background:rgba(52,211,153,.14);color:#8ef0c4}
+  .preset .tag.warn{background:rgba(251,191,36,.14);color:#ffd984}
+
+  .adv{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;margin-top:12px}
+  .adv-head{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;font-size:12px;color:#a7aebb}
+  .adv-body{display:none;padding:0 14px 14px;grid-template-columns:1fr 1fr;gap:12px}
+  .adv.open .adv-body{display:grid}
+  .field label{display:block;font-size:10.5px;color:var(--muted);margin-bottom:4px}
+  .field select,.field input{width:100%;height:30px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:6px;color:var(--text);font:inherit;font-size:12px;padding:0 8px;outline:0}
+  .field input:focus,.field select:focus{border-color:rgba(76,154,255,.5)}
+
+  /* ---- estimate card ---- */
+  .est{border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#151922,#111519);
+    padding:16px 18px;position:sticky;top:18px}
+  .est h3{margin:0 0 14px;font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.04em}
+  .est .big{display:flex;align-items:baseline;gap:10px}
+  .est .from{font-size:13px;color:#8b93a5;text-decoration:line-through}
+  .est .to{font-size:26px;font-weight:700;letter-spacing:-.5px}
+  .est .save{margin-left:auto;font-size:12px;font-weight:600;color:#8ef0c4;
+    background:rgba(52,211,153,.13);padding:3px 9px;border-radius:99px}
+  .bar{height:8px;border-radius:99px;background:#232833;overflow:hidden;margin:14px 0 6px;display:flex}
+  .bar .keep{background:linear-gradient(90deg,#4c9aff,#7c5cff)}
+  .bar .cut{background:#2a3140}
+  .legend{display:flex;gap:14px;font-size:10.5px;color:var(--muted)}
+  .legend i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px;vertical-align:1px}
+  .rows{margin-top:14px;border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:8px}
+  .row{display:flex;justify-content:space-between;font-size:11.5px;color:#a7aebb}
+  .row b{color:var(--text);font-weight:600}
+  .warnbox{margin-top:12px;border:1px solid rgba(251,191,36,.28);background:rgba(251,191,36,.07);
+    border-radius:8px;padding:9px 11px;font-size:11px;color:#ffd984;line-height:1.6}
+  .outbox{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+  .outbox .path{font-size:11px;color:#cfe3ff;background:var(--panel2);border:1px solid var(--line);
+    border-radius:6px;padding:7px 9px;margin-top:6px;word-break:break-all}
+  .chk{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#a7aebb;margin-top:9px}
+  .chk input{accent-color:var(--accent)}
+
+  /* ---- running ---- */
+  .run{padding:18px 22px;display:flex;flex-direction:column;gap:14px}
+  .totbar{height:6px;border-radius:99px;background:#232833;overflow:hidden}
+  .totbar .f{height:100%;width:0;background:linear-gradient(90deg,#4c9aff,#7c5cff);transition:width .3s}
+  .jobrow{display:flex;align-items:center;gap:14px;padding:11px 14px;border:1px solid var(--line);
+    border-radius:9px;background:var(--panel)}
+  .jobrow .nm{width:280px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .jobrow .sz{font-size:11px;color:var(--muted);width:150px}
+  .jobrow .pbar{flex:1;height:5px;border-radius:99px;background:#232833;overflow:hidden}
+  .jobrow .pbar .f{height:100%;width:0;background:var(--accent);transition:width .25s}
+  .jobrow .st{width:96px;text-align:right;font-size:11px;color:var(--muted)}
+  .jobrow.done{border-color:rgba(52,211,153,.3)}
+  .jobrow.done .st{color:#8ef0c4}
+  .jobrow.skip{opacity:.55}
+  .jobrow.skip .st{color:#ffd984}
+
+  /* ---- done ---- */
+  .done{padding:26px 22px;max-width:720px}
+  .done .tick{width:46px;height:46px;border-radius:50%;background:rgba(52,211,153,.14);
+    display:flex;align-items:center;justify-content:center;color:#8ef0c4;font-size:22px;margin-bottom:14px}
+  .statgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0}
+  .statcard{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 14px}
+  .statcard .k{font-size:10.5px;color:var(--muted)}
+  .statcard .v{font-size:19px;font-weight:700;margin-top:3px}
+  .actions{display:flex;gap:10px;margin-top:8px}
+
+  /* ---- exif ---- */
+  .exifgrid{display:grid;grid-template-columns:1fr 360px;gap:18px;padding:18px 22px;align-items:start}
+  .ftable{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .ftable .hd,.ftable .frow{display:grid;grid-template-columns:26px 1fr 1.2fr 90px;gap:10px;
+    align-items:center;padding:10px 14px;font-size:11.5px}
+  .ftable .hd{background:#11151c;color:var(--muted);font-size:10.5px;letter-spacing:.03em}
+  .ftable .frow{border-top:1px solid var(--line)}
+  .ftable .frow:hover{background:#161a22}
+  .ftable .val{color:#a7aebb;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ftable .flag{font-size:10px;text-align:right}
+  .flag.privacy{color:#ff9d97}
+  .flag.keep{color:#8ef0c4}
+  .ftable input{accent-color:var(--accent)}
+  .ftable input:disabled{opacity:.5}
+
+  .toast{position:fixed;left:50%;bottom:56px;transform:translate(-50%,16px);opacity:0;
+    background:#1d2330;border:1px solid #2f3747;color:#dfe6f3;font-size:12px;
+    padding:9px 16px;border-radius:99px;transition:.25s;pointer-events:none}
+  .toast.on{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand"><i></i>Czkawka <small>VideoCC</small></div>
+    <div id="toolName" style="font-size:14px;font-weight:600;margin-left:8px">视频优化器</div>
+    <span class="pill" id="selInfo">已选 12 个文件 · 3.4 GB</span>
+    <div class="spacer"></div>
+    <button class="btn ghost" id="btnReset">重置演示</button>
+  </header>
+
+  <main>
+    <aside class="rail">
+      <div class="rail-item on" data-tool="video">▶ 视频优化器</div>
+      <div class="rail-item" data-tool="exif">⛨ EXIF 移除器</div>
+    </aside>
+    <section class="stage" id="stage"></section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const FILES = [
+  {n:"clip_0142.mp4", mb:412.0, res:"1080×1920", h265:false},
+  {n:"kpop_stage.mp4", mb:388.5, res:"1080×1920", h265:false},
+  {n:"red carpet 1.mp4", mb:301.2, res:"1920×1080", h265:false},
+  {n:"dance_01.mp4", mb:288.0, res:"1080×1920", h265:true},
+  {n:"airport look.mp4", mb:265.4, res:"1080×1920", h265:false},
+  {n:"scan_0091.mp4", mb:242.8, res:"1080×1920", h265:false},
+  {n:"VID_20240312.mp4", mb:221.0, res:"1920×1080", h265:false},
+  {n:"IMG_8821.mov", mb:198.6, res:"1080×1920", h265:true},
+  {n:"dance_01_hd.mp4", mb:186.2, res:"1080×1920", h265:false},
+  {n:"clip_0142_re.mp4", mb:174.4, res:"1080×1920", h265:false},
+  {n:"airport look_2.mp4", mb:163.0, res:"720×1280", h265:false},
+  {n:"clip_0142_720p.mp4", mb:152.1, res:"720×1280", h265:false}
+];
+
+const PRESETS = {
+  social:  {nm:"社交分享", ds:"1080p 上限 · H.264 · CRF 23", ratio:.32, tag:"省 68%", note:"适合发抖音 / 微博"},
+  archive: {nm:"长期存档", ds:"原分辨率 · H.265 · CRF 20", ratio:.50, tag:"省 50%", note:"体积减半，画质几乎无损"},
+  extreme: {nm:"极致压缩", ds:"720p · H.264 · CRF 28", ratio:.24, tag:"省 76%", warn:true, note:"只求能看，细节损失明显"}
+};
+
+let tool = "video";
+let preset = "social";
+let advOpen = false;
+let phase = "config";     // config | running | done
+let progress = 0;
+let timer = null;
+let exifKeep = { time:true, orientation:true, gps:false, model:false, software:false, thumb:false };
+
+const totalMB = FILES.reduce((s,f)=>s+f.mb,0)/1024;   // GB
+const fmtGB = g => g.toFixed(1)+" GB";
+
+function toast(msg){
+  const t=document.getElementById("toast");
+  t.textContent=msg;t.classList.add("on");
+  clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove("on"),2000);
+}
+
+/* ---------------- 视频优化器 ---------------- */
+function videoConfig(){
+  const p = PRESETS[preset];
+  const outGB = totalMB * p.ratio;
+  const save = Math.round((1-p.ratio)*100);
+  const eta = Math.round(totalMB*1024/18/60);   // 18 MB/s
+  const skipped = FILES.filter(f=>f.h265).length;
+
+  return `
+  <div class="cfg">
+    <div>
+      <h2 class="h1">视频优化器</h2>
+      <div class="sub">把视频重新编码到更小的体积，原文件保持不动，输出到独立目录</div>
+
+      <div class="section-label">选择预设</div>
+      <div class="presets">
+        ${Object.entries(PRESETS).map(([k,v])=>`
+          <div class="preset ${preset===k?"on":""}" data-preset="${k}">
+            <div class="nm">${v.nm} <span class="tag ${v.warn?"warn":""}">${v.tag}</span></div>
+            <div class="ds">${v.ds}<br>${v.note}</div>
+          </div>`).join("")}
+      </div>
+
+      <div class="adv ${advOpen?"open":""}" id="adv">
+        <div class="adv-head" id="advHead">⚙ 高级参数 <span style="color:#5f6779;margin-left:auto">${advOpen?"收起":"展开"}</span></div>
+        <div class="adv-body">
+          <div class="field"><label>分辨率上限</label>
+            <select><option>1080p</option><option>720p</option><option>原分辨率</option></select></div>
+          <div class="field"><label>编码器</label>
+            <select><option>H.264 (x264)</option><option>H.265 (x265)</option></select></div>
+          <div class="field"><label>质量 CRF</label><input value="23"></div>
+          <div class="field"><label>音频</label>
+            <select><option>AAC 128k</option><option>AAC 64k</option><option>移除音轨</option></select></div>
+          <div class="field"><label>硬件加速</label>
+            <select><option>关闭（推荐）</option><option>NVENC</option><option>QSV</option></select></div>
+          <div class="field"><label>字幕</label>
+            <select><option>保留</option><option>移除</option></select></div>
+        </div>
+      </div>
+
+      <div class="section-label" style="margin-top:20px">待处理文件（12）</div>
+      <div class="ftable">
+        <div class="hd" style="grid-template-columns:1fr 110px 100px 100px 76px">
+          <span>文件名</span><span>分辨率</span><span>当前</span><span>预计</span><span style="text-align:right">状态</span>
+        </div>
+        ${FILES.map(f=>{
+          const skip = f.h265 && preset === "archive";
+          return `<div class="frow" style="grid-template-columns:1fr 110px 100px 100px 76px">
+            <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.n}</span>
+            <span class="val">${f.res}</span>
+            <span class="val">${f.mb.toFixed(1)} MB</span>
+            <span class="val">${(f.mb*p.ratio).toFixed(1)} MB</span>
+            <span class="flag ${skip?"keep":""}" style="text-align:right">${skip?"跳过":"—"}</span>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>
+
+    <div class="est">
+      <h3>预估结果</h3>
+      <div class="big">
+        <span class="from">${fmtGB(totalMB)}</span>
+        <span class="to">${fmtGB(outGB)}</span>
+        <span class="save">省 ${save}%</span>
+      </div>
+      <div class="bar">
+        <div class="keep" style="width:${(1-p.ratio)*100}%"></div>
+        <div class="cut" style="flex:1"></div>
+      </div>
+      <div class="legend"><span><i style="background:#4c9aff"></i>优化后</span><span><i style="background:#2a3140"></i>节省</span></div>
+
+      <div class="rows">
+        <div class="row"><span>文件数</span><b>${FILES.length} 个</b></div>
+        <div class="row"><span>预计耗时</span><b>约 ${eta} 分</b></div>
+        <div class="row"><span>分辨率分布</span><b>1080p × 9 · 720p × 3</b></div>
+      </div>
+
+      ${skipped?`<div class="warnbox">⚠ ${skipped} 个文件已是 H.265，转 H.265 时会被跳过，转 H.264 则正常处理</div>`:""}
+
+      <div class="outbox">
+        <div style="font-size:11px;color:var(--muted)">输出位置</div>
+        <div class="path">H:\\NFZ\\Celebrity\\DFaceNew\\_optimized\\</div>
+        <label class="chk"><input type="checkbox" checked> 保留原文件（推荐）</label>
+        <label class="chk"><input type="checkbox"> 优化完成后删除原文件（进隔离区）</label>
+      </div>
+
+      <button class="btn primary" id="btnRun" style="width:100%;height:38px;margin-top:16px;font-size:13px">
+        开始优化 · 预计 ${eta} 分钟
+      </button>
+    </div>
+  </div>`;
+}
+
+/* ---------------- 执行中 ---------------- */
+function videoRunning(){
+  const p = PRESETS[preset];
+  const rows = FILES.map((f,i)=>{
+    const out = (f.mb*p.ratio).toFixed(1);
+    return `<div class="jobrow" data-i="${i}">
+      <div class="nm">${f.n}</div>
+      <div class="sz">${f.mb.toFixed(1)} MB → ${out} MB</div>
+      <div class="pbar"><div class="f"></div></div>
+      <div class="st">等待中</div>
+    </div>`;
+  }).join("");
+
+  return `<div class="run">
+    <div style="display:flex;align-items:baseline;gap:10px">
+      <div style="font-size:15px;font-weight:600">正在优化</div>
+      <div style="font-size:11.5px;color:#8b93a5" id="runMeta">0 / ${FILES.length} 个文件 · 剩余计算中</div>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="btnCancel">暂停</button>
+      <button class="btn danger" id="btnStop">取消</button>
+    </div>
+    <div class="totbar"><div class="f" id="totFill"></div></div>
+    ${rows}
+  </div>`;
+}
+
+/* ---------------- 完成 ---------------- */
+function videoDone(){
+  const p = PRESETS[preset];
+  const outGB = totalMB*p.ratio;
+  return `<div class="done">
+    <div class="tick">✓</div>
+    <h2 class="h1">优化完成</h2>
+    <div class="sub">原文件未改动，优化结果在 _optimized 目录</div>
+    <div class="statgrid">
+      <div class="statcard"><div class="k">成功</div><div class="v" style="color:#8ef0c4">${FILES.length} 个</div></div>
+      <div class="statcard"><div class="k">节省空间</div><div class="v">${fmtGB(totalMB-outGB)}</div></div>
+      <div class="statcard"><div class="k">平均压缩率</div><div class="v">${Math.round((1-p.ratio)*100)}%</div></div>
+    </div>
+    <div class="actions">
+      <button class="btn primary" onclick="toast('已打开输出目录（示意）')">打开输出目录</button>
+      <button class="btn" onclick="toast('整批输出已移入隔离区（示意）')">撤销本次</button>
+      <button class="btn ghost" onclick="toast('报告已导出 CSV（示意）')">导出报告</button>
+    </div>
+  </div>`;
+}
+
+/* ---------------- EXIF ---------------- */
+const FIELDS = [
+  {k:"gps",        name:"GPS 坐标",        val:"31.2304, 121.4737", lock:true,  priv:true},
+  {k:"model",      name:"相机 / 镜头",     val:"Canon EOS R5 · RF 50mm F1.2", priv:true},
+  {k:"time",       name:"拍摄时间",        val:"2024-03-12 09:12:44"},
+  {k:"software",   name:"软件 / 序列号",   val:"Lightroom 13.2 · SN 0481...", priv:true},
+  {k:"orientation",name:"方向 Orientation",val:"6 (顺时针 90°)", keep:true},
+  {k:"thumb",      name:"内嵌缩略图",      val:"160×120 JPEG · 4.2 KB"}
+];
+
+function exifConfig(){
+  const totalMBx = 12*8.4;
+  return `<div class="exifgrid">
+    <div>
+      <h2 class="h1">EXIF 移除器</h2>
+      <div class="sub">先看清文件里有什么，再决定保留哪些字段</div>
+
+      <div class="section-label">元数据字段（12 张照片，其中 1 张预览）</div>
+      <div class="ftable">
+        <div class="hd"><span></span><span>字段</span><span>当前值</span><span style="text-align:right">处理</span></div>
+        ${FIELDS.map(f=>{
+          const checked = f.lock ? false : !!exifKeep[f.k];
+          const disabled = f.lock || f.keep;
+          return `<div class="frow">
+            <input type="checkbox" ${checked?"checked":""} ${disabled?"disabled":""} data-field="${f.k}">
+            <span>${f.name}</span>
+            <span class="val">${f.val}</span>
+            <span class="flag ${f.priv?"privacy":f.keep?"keep":""}">
+              ${f.lock?"强制移除":f.keep?"强制保留":checked?"保留":"移除"}
+            </span>
+          </div>`;
+        }).join("")}
+      </div>
+      <div class="warnbox" style="margin-top:12px">
+        ⓘ Orientation 必须保留，否则竖拍照片导入后方向会错乱。GPS 坐标强制移除，不可关闭。
+      </div>
+    </div>
+
+    <div class="est">
+      <h3>处理摘要</h3>
+      <div class="rows" style="margin-top:0;border-top:0;padding-top:0">
+        <div class="row"><span>文件数</span><b>12 张</b></div>
+        <div class="row"><span>总大小</span><b>${fmtGB(totalMBx/1024)}</b></div>
+        <div class="row"><span>移除字段</span><b>${Object.values(exifKeep).filter(v=>!v).length + 1} 个</b></div>
+        <div class="row"><span>预计耗时</span><b>约 4 秒</b></div>
+      </div>
+
+      <div class="outbox">
+        <div style="font-size:11px;color:var(--muted)">输出方式</div>
+        <label class="chk"><input type="radio" name="out" checked> 输出到 _clean\\（原文件不动）</label>
+        <label class="chk"><input type="radio" name="out"> 覆盖原文件（自动备份到 _backup\\）</label>
+      </div>
+
+      <button class="btn primary" id="btnExif" style="width:100%;height:38px;margin-top:16px;font-size:13px">
+        移除元数据 · 12 张
+      </button>
+    </div>
+  </div>`;
+}
+
+/* ---------------- 渲染 ---------------- */
+function render(){
+  const stage = document.getElementById("stage");
+  document.getElementById("toolName").textContent = tool==="video" ? "视频优化器" : "EXIF 移除器";
+  document.getElementById("selInfo").textContent = tool==="video" ? "已选 12 个文件 · 3.4 GB" : "已选 12 张照片 · 98.4 MB";
+
+  if (tool === "exif") { stage.innerHTML = exifConfig(); bindExif(); return; }
+
+  if (phase === "config") { stage.innerHTML = videoConfig(); bindVideo(); }
+  else if (phase === "running") { stage.innerHTML = videoRunning(); bindRunning(); }
+  else { stage.innerHTML = videoDone(); }
+}
+
+function bindVideo(){
+  document.querySelectorAll(".preset").forEach(el=>{
+    el.onclick = ()=>{ preset = el.dataset.preset; render(); };
+  });
+  const adv = document.getElementById("adv");
+  document.getElementById("advHead").onclick = ()=>{ advOpen = !advOpen; adv.classList.toggle("open", advOpen); };
+  document.getElementById("btnRun").onclick = ()=>{ phase="running"; progress=0; render(); };
+}
+
+function bindRunning(){
+  let tick = 0;
+  const rows = [...document.querySelectorAll(".jobrow")];
+  const total = FILES.length;
+  clearInterval(timer);
+  timer = setInterval(()=>{
+    tick++;
+    const per = 0.42;                      // 每秒推进的文件比例
+    const doneCount = Math.min(total, Math.floor(tick*per));
+    rows.forEach((r,i)=>{
+      const f = FILES[i];
+      const skip = f.h265 && preset === "archive";
+      if (i < doneCount) {
+        r.classList.add(skip?"skip":"done");
+        r.querySelector(".st").textContent = skip ? "已跳过" : "完成";
+        r.querySelector(".pbar .f").style.width = "100%";
+      } else if (i === doneCount) {
+        r.querySelector(".st").textContent = "优化中";
+        r.querySelector(".pbar .f").style.width = ((tick*per)%1*100).toFixed(0)+"%";
+      }
+    });
+    progress = Math.min(100, Math.round(doneCount/total*100));
+    document.getElementById("totFill").style.width = progress+"%";
+    const left = Math.max(0, Math.ceil((total-doneCount)/per));
+    document.getElementById("runMeta").textContent = `${doneCount} / ${total} 个文件 · 剩余 ${left} 秒`;
+    if (doneCount >= total) { clearInterval(timer); setTimeout(()=>{ phase="done"; render(); }, 600); }
+  }, 320);
+
+  document.getElementById("btnStop").onclick = ()=>{ clearInterval(timer); phase="config"; render(); toast("已取消，未产生半截文件"); };
+  document.getElementById("btnCancel").onclick = ()=> toast("已暂停（当前文件跑完后停止）");
+}
+
+function bindExif(){
+  document.querySelectorAll("[data-field]").forEach(cb=>{
+    cb.onchange = ()=>{
+      exifKeep[cb.dataset.field] = cb.checked;
+      const row = cb.closest(".frow");
+      const flag = row.querySelector(".flag");
+      if (flag && !flag.classList.contains("keep")) {
+        flag.textContent = cb.checked ? "保留" : "移除";
+      }
+    };
+  });
+  document.getElementById("btnExif").onclick = ()=> toast("已移除元数据 · 12 张（示意）");
+}
+
+document.querySelectorAll(".rail-item").forEach(el=>{
+  el.onclick = ()=>{
+    if (el.dataset.tool === tool) return;
+    tool = el.dataset.tool;
+    document.querySelectorAll(".rail-item").forEach(x=>x.classList.toggle("on", x===el));
+    phase = "config";
+    render();
+  };
+});
+
+document.getElementById("btnReset").onclick = ()=>{
+  clearInterval(timer);
+  phase="config"; preset="social"; progress=0; exifKeep={time:true,orientation:true,gps:false,model:false,software:false,thumb:false};
+  render();
+};
+
+/* 截图辅助：?tool=exif&phase=running */
+(function boot(){
+  const q = new URLSearchParams(location.search);
+  if (q.get("tool") === "exif") {
+    tool = "exif";
+    document.querySelectorAll(".rail-item").forEach(x=>x.classList.toggle("on", x.dataset.tool==="exif"));
+  }
+  if (q.get("preset")) preset = q.get("preset");
+  if (q.get("phase")) phase = q.get("phase");
+  render();
+})();
+</script>
+</body>
+</html>

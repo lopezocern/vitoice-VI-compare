@@ -1,0 +1,31 @@
+[package]
+name = "vitoicecompare"
+version = "0.1.0"
+description = "VitoiceCompare - 视频素材去重与整理"
+authors = ["vitoice"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "vitoicecompare_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+base64 = "0.22"
+blake3 = "1"
+infer = "0.19"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif", "tiff"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

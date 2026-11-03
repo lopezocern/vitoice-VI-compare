@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VideoCC · 扫描范围设计</title>
+<style>
+  :root{
+    --bg:#0d0f13; --panel:#14171d; --panel2:#1a1e26; --line:#262b36;
+    --text:#e6e9ef; --muted:#8b93a5; --accent:#4c9aff;
+    --ok:#34d399; --warn:#fbbf24; --danger:#ff5f57;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;overflow:hidden}
+  button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+
+  .shell{display:flex;flex-direction:column;height:100vh}
+  .topbar{display:flex;align-items:center;gap:14px;height:52px;padding:0 16px;
+    border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto;position:relative;z-index:20}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:600}
+  .brand i{width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,#4c9aff,#7c5cff);display:block}
+  .brand small{color:var(--muted);font-weight:400;font-size:11px}
+  .toolname{font-size:14px;font-weight:600;margin-left:6px}
+  .spacer{flex:1}
+
+  .scope-btn{display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:8px;
+    background:var(--panel2);border:1px solid var(--line);font-size:12px;transition:.15s}
+  .scope-btn:hover{background:#20242e;border-color:#333a48}
+  .scope-btn.on{border-color:rgba(76,154,255,.55);background:rgba(76,154,255,.1)}
+  .scope-btn .cnt{color:#8b93a5;font-size:11px}
+  .badge{min-width:17px;height:17px;padding:0 5px;border-radius:9px;background:rgba(251,191,36,.18);
+    color:#ffd984;font-size:10.5px;display:inline-flex;align-items:center;justify-content:center}
+
+  .btn{height:32px;padding:0 12px;border-radius:6px;background:var(--panel2);
+    border:1px solid var(--line);font-size:12px;transition:.15s}
+  .btn:hover{background:#20242e;border-color:#333a48}
+  .btn.ghost{background:none}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#06101f;font-weight:600}
+  .btn.primary:disabled{opacity:.35;cursor:not-allowed}
+
+  /* popover */
+  .pop{position:absolute;top:48px;right:16px;width:460px;background:#161a21;
+    border:1px solid #2c3340;border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.55);
+    opacity:0;transform:translateY(-6px) scale(.99);pointer-events:none;transition:.16s;z-index:30}
+  .pop.on{opacity:1;transform:none;pointer-events:auto}
+  .pop-hd{display:flex;align-items:center;gap:8px;padding:13px 16px;border-bottom:1px solid var(--line)}
+  .pop-hd .t{font-size:13px;font-weight:600}
+  .pop-bd{padding:12px 16px;max-height:66vh;overflow:auto}
+  .grp{font-size:10.5px;color:var(--muted);letter-spacing:.04em;margin:6px 0 8px;display:flex;align-items:center;gap:8px}
+  .grp .hint{color:#5f6779;letter-spacing:0;font-size:10.5px}
+
+  .srow{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;
+    border:1px solid transparent;transition:.12s}
+  .srow:hover{background:#1b2029}
+  .srow .ic{width:15px;text-align:center;opacity:.75;font-size:12px}
+  .srow .p{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px}
+  .srow .main{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .srow .rel{font-size:10.5px;color:#6b7386;white-space:nowrap;flex:0 0 auto}
+  .srow .x{width:20px;height:20px;border-radius:5px;color:#6b7386;font-size:14px;line-height:1;
+    display:flex;align-items:center;justify-content:center;opacity:0;transition:.12s}
+  .srow:hover .x{opacity:1}
+  .srow .x:hover{background:rgba(255,95,87,.15);color:#ff9d97}
+  .srow.bad{border-color:rgba(255,95,87,.4);background:rgba(255,95,87,.06)}
+  .srow.bad .main{color:#ffb4ae}
+  .srow.warn{border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.05)}
+  .srow.warn .main{color:#ffd984}
+  .tag{font-size:10px;padding:1px 6px;border-radius:99px;flex:0 0 auto}
+  .tag.err{background:rgba(255,95,87,.15);color:#ff9d97}
+  .tag.w{background:rgba(251,191,36,.15);color:#ffd984}
+
+  .add{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px dashed #2c3340;
+    color:#8b93a5;font-size:11.5px;margin-top:4px;transition:.12s}
+  .add:hover{border-color:#3d4657;color:#c7d0df;background:#181d25}
+
+  .note{display:flex;gap:8px;align-items:flex-start;margin-top:10px;padding:9px 11px;border-radius:8px;
+    font-size:11px;line-height:1.6}
+  .note.w{background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.28);color:#ffd984}
+  .note.e{background:rgba(255,95,87,.07);border:1px solid rgba(255,95,87,.3);color:#ffb4ae}
+
+  .pop-ft{display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:1px solid var(--line)}
+  .recent{display:flex;gap:6px;flex-wrap:wrap;font-size:11px;color:#8b93a5}
+  .chip{padding:3px 9px;border-radius:99px;border:1px solid var(--line);background:#1a1e26;
+    font-size:11px;color:#a7aebb;cursor:pointer}
+  .chip:hover{border-color:#3d4657;color:var(--text)}
+
+  /* stage */
+  .stage{flex:1;display:flex;align-items:center;justify-content:center;padding:40px}
+  .drop{width:min(620px,80%);border:1.5px dashed #2c3340;border-radius:16px;padding:54px 32px;
+    text-align:center;transition:.18s;cursor:pointer}
+  .drop:hover{border-color:rgba(76,154,255,.5);background:rgba(76,154,255,.04)}
+  .drop .big{font-size:34px;opacity:.5;margin-bottom:14px}
+  .drop h2{margin:0 0 8px;font-size:16px;font-weight:600}
+  .drop p{margin:0;font-size:12px;color:var(--muted);line-height:1.8}
+  .drop .kbd{display:inline-block;padding:1px 6px;border:1px solid var(--line);border-bottom-width:2px;
+    border-radius:4px;font-size:10px;color:#9aa3b5;background:#1b1f28}
+
+  .toast{position:fixed;left:50%;bottom:56px;transform:translate(-50%,16px);opacity:0;
+    background:#1d2330;border:1px solid #2f3747;color:#dfe6f3;font-size:12px;
+    padding:9px 16px;border-radius:99px;transition:.25s;pointer-events:none;z-index:40}
+  .toast.on{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand"><i></i>Czkawka <small>VideoCC</small></div>
+    <div class="toolname">相似视频</div>
+    <div class="spacer"></div>
+    <button class="scope-btn" id="scopeBtn">
+      📁 扫描范围 <span class="cnt" id="scopeCnt">2 个目录 · 排除 3</span>
+      <span class="badge" id="scopeBadge">1</span>
+    </button>
+    <button class="btn primary" id="btnScan">开始扫描</button>
+  </header>
+
+  <section class="stage">
+    <div class="drop">
+      <div class="big">📂</div>
+      <h2>把文件夹拖进来</h2>
+      <p>
+        或点击右上角「扫描范围」选择目录<br>
+        拖到 <b>包含</b> 区域加入扫描，拖到 <b>排除</b> 区域跳过
+      </p>
+    </div>
+  </section>
+
+  <div class="pop" id="pop">
+    <div class="pop-hd">
+      <span class="t">扫描范围</span>
+      <span class="hint" style="font-size:10.5px;color:#5f6779">留空则无法扫描</span>
+      <div class="spacer"></div>
+      <button class="x" id="popClose" style="width:22px;height:22px;border-radius:5px;color:#6b7386">×</button>
+    </div>
+
+    <div class="pop-bd">
+      <div class="grp">包含目录 <span class="hint" id="incHint">2 个</span></div>
+      <div id="incList"></div>
+      <div class="add" id="addInc">＋ 添加目录　<span style="color:#5f6779;font-size:10.5px">（支持多选 / 拖放）</span></div>
+
+      <div class="grp" style="margin-top:16px">排除目录 <span class="hint">优先级高于包含</span></div>
+      <div id="excList"></div>
+      <div class="add" id="addExc">＋ 添加排除</div>
+
+      <div id="notes"></div>
+    </div>
+
+    <div class="pop-ft">
+      <div class="recent">
+        最近：
+        <span class="chip">NFZ 素材库</span>
+        <span class="chip">G:\素材\2024</span>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="btnCancel">取消</button>
+      <button class="btn primary" id="btnOk">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let includes = [
+  { path: "H:\\NFZ\\Celebrity", exists: true },
+  { path: "G:\\素材\\2024\\原始素材备份", exists: true }
+];
+let excludes = [
+  { path: "# 123", rel: "H:\\NFZ\\Celebrity", exists: true, inside: true },
+  { path: "G:\\素材\\2024\\原始素材备份\\_optimized", rel: "G:\\素材\\2024\\原始素材备份", exists: true, inside: true },
+  { path: "D:\\Old\\clips", rel: null, exists: true, inside: false }
+];
+
+const FORCE_INVALID = location.search.indexOf("invalid") >= 0;
+if (FORCE_INVALID) includes[1].exists = false;
+const FORCE_EMPTY = location.search.indexOf("empty") >= 0;
+if (FORCE_EMPTY) { includes = []; excludes = []; }
+
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("on");
+  clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove("on"), 1900);
+}
+
+/* 中间省略：保留盘符和末尾目录 */
+function midShort(p, max = 38){
+  if (p.length <= max) return p;
+  const head = p.slice(0, 10);
+  const tail = p.slice(p.length - (max - 11));
+  return head + "…" + tail;
+}
+
+function render(){
+  const inc = document.getElementById("incList");
+  const exc = document.getElementById("excList");
+
+  inc.innerHTML = includes.map((it,i)=>`
+    <div class="srow ${it.exists?"":"bad"}" data-i="${i}">
+      <span class="ic">📁</span>
+      <div class="p">
+        <span class="main" title="${it.path}">${midShort(it.path)}</span>
+        ${it.exists?"":'<span class="tag err">路径不存在</span>'}
+      </div>
+      <button class="x" data-rm="inc" data-i="${i}">×</button>
+    </div>`).join("") ||
+    `<div style="padding:10px;color:#5f6779;font-size:11.5px">还没有添加目录</div>`;
+
+  exc.innerHTML = excludes.map((it,i)=>{
+    const cls = !it.exists ? "bad" : (it.inside === false ? "warn" : "");
+    const tag = !it.exists
+      ? '<span class="tag err">路径不存在</span>'
+      : (it.inside === false ? '<span class="tag w">不在包含内</span>' : "");
+    return `<div class="srow ${cls}">
+      <span class="ic">🚫</span>
+      <div class="p">
+        <span class="main" title="${it.path}">${midShort(it.path)}</span>
+        ${it.rel && it.inside !== false ? `<span class="rel">相对 ${midShort(it.rel, 22)}</span>` : ""}
+        ${tag}
+      </div>
+      <button class="x" data-rm="exc" data-i="${i}">×</button>
+    </div>`;
+  }).join("") ||
+    `<div style="padding:10px;color:#5f6779;font-size:11.5px">没有排除项</div>`;
+
+  const badInc = includes.filter(x=>!x.exists).length;
+  const outside = excludes.filter(x=>x.inside === false).length;
+  const notes = document.getElementById("notes");
+  notes.innerHTML = [
+    outside ? `<div class="note w">⚠ ${outside} 个排除目录不在任何包含目录内，扫描时将不会生效</div>` : "",
+    badInc ? `<div class="note e">✕ ${badInc} 个包含目录不存在，请移除或修正后再扫描</div>` : ""
+  ].join("");
+
+  document.getElementById("scopeCnt").textContent =
+    `${includes.length} 个目录${excludes.length?` · 排除 ${excludes.length}`:""}`;
+  document.getElementById("scopeBadge").style.display = (outside + badInc) ? "" : "none";
+  document.getElementById("scopeBadge").textContent = outside + badInc;
+  document.getElementById("btnScan").disabled = includes.length === 0 || badInc > 0;
+  document.getElementById("incHint").textContent = `${includes.length} 个`;
+
+  document.querySelectorAll("[data-rm]").forEach(btn=>{
+    btn.onclick = (e)=>{
+      e.stopPropagation();
+      const kind = btn.dataset.rm, i = +btn.dataset.i;
+      if (kind === "inc") includes.splice(i,1); else excludes.splice(i,1);
+      render();
+    };
+  });
+}
+
+const pop = document.getElementById("pop");
+document.getElementById("scopeBtn").onclick = ()=>{
+  pop.classList.toggle("on");
+  document.getElementById("scopeBtn").classList.toggle("on", pop.classList.contains("on"));
+};
+document.getElementById("popClose").onclick = ()=> pop.classList.remove("on");
+document.getElementById("btnCancel").onclick = ()=> pop.classList.remove("on");
+document.getElementById("btnOk").onclick = ()=>{ pop.classList.remove("on"); toast("范围已保存"); };
+
+document.getElementById("addInc").onclick = ()=>{
+  includes.push({ path: "H:\\NFZ\\Celebrity\\新增目录", exists: true });
+  render(); toast("已打开目录选择器（示意）");
+};
+document.getElementById("addExc").onclick = ()=>{
+  excludes.push({ path: "H:\\NFZ\\Celebrity\\_optimized", rel: "H:\\NFZ\\Celebrity", exists: true, inside: true });
+  render();
+};
+document.getElementById("btnScan").onclick = ()=> toast("开始扫描（示意）");
+
+document.querySelector(".drop").onclick = ()=> document.getElementById("scopeBtn").click();
+
+render();
+if (!FORCE_EMPTY && location.search.indexOf("closed") < 0) {
+  pop.classList.add("on");
+  document.getElementById("scopeBtn").classList.add("on");
+}
+</script>
+</body>
+</html>
