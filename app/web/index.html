@@ -640,7 +640,7 @@
 
 <script>
 /* ---------------- data ---------------- */
-const TOOLS = ["重复文件","空文件夹","大文件","空文件","临时文件","相似图像","相似视频","重复音乐","无效的符号链接","损坏的文件","错误的扩展名","不规范名称","EXIF 移除器","视频优化器"];
+const TOOLS = ["重复文件","空文件夹","大文件","空文件","临时文件","相似图像","相似视频","重复音乐","无声视频","无效的符号链接","损坏的文件","错误的扩展名","不规范名称","EXIF 移除器","视频优化器"];
 const ICONS = {"重复文件":"⧉","空文件夹":"▤","大文件":"⇲","空文件":"◌","临时文件":"⏱","相似图像":"▣","相似视频":"▶","重复音乐":"♫","无效的符号链接":"⤳","损坏的文件":"⚠","错误的扩展名":"⌥","不规范名称":"Aa","EXIF 移除器":"⛨","视频优化器":"⚙"};
 
 let GROUPS = [
@@ -788,6 +788,7 @@ const TOOL_ICONS = {
   "similar-images": svgIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5-9 9"/>'),
   "similar-videos": svgIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/>'),
   "same-music": svgIcon('<path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>'),
+  "silent-videos": svgIcon('<path d="M11 5L6 9H3v6h3l5 4z"/><path d="M22 9l-6 6"/><path d="M16 9l6 6"/>'),
   "invalid-symlinks": svgIcon('<path d="M11 6l1-1a4 4 0 0 1 6 6l-1 1"/><path d="M13 18l-1 1a4 4 0 0 1-6-6l1-1"/><path d="M9 15l6-6"/>'),
   "broken-files": svgIcon('<path d="M12 3l9 17H3z"/><path d="M12 9v5"/><path d="M12 17.5h.01"/>'),
   "bad-extensions": svgIcon('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9 17l6-6"/>'),
@@ -795,7 +796,7 @@ const TOOL_ICONS = {
   "exif-remover": svgIcon('<path d="M12 3l7 3v5.5c0 4.6-3.2 7.9-7 9.5-3.8-1.6-7-4.9-7-9.5V6z"/><path d="M9 12l2 2 4-4"/>'),
   "video-optimizer": svgIcon('<path d="M4 7h9"/><path d="M19 7h1"/><circle cx="16" cy="7" r="2"/><path d="M4 17h1"/><path d="M11 17h9"/><circle cx="8" cy="17" r="2"/>')
 };
-const TOOL_IDS = ["duplicates","empty-folders","biggest-files","empty-files","temporary","similar-images","similar-videos","same-music","invalid-symlinks","broken-files","bad-extensions","bad-names","exif-remover","video-optimizer"];
+const TOOL_IDS = ["duplicates","empty-folders","biggest-files","empty-files","temporary","similar-images","similar-videos","same-music","silent-videos","invalid-symlinks","broken-files","bad-extensions","bad-names","exif-remover","video-optimizer"];
 const RAIL_FALLBACK = TOOLS.map((n, i) => ({ id: TOOL_IDS[i], name: n, glyph: ICONS[n] || "•" }));
 function renderRail(items){
   const rail = document.getElementById("rail");

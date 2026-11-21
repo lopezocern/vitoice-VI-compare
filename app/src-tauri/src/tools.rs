@@ -13,6 +13,7 @@ pub const IMPLEMENTED: &[&str] = &[
     "similar-images",
     "similar-videos",
     "same-music",
+    "silent-videos",
     "invalid-symlinks",
     "broken-files",
     "bad-extensions",
@@ -112,6 +113,7 @@ pub fn run(tool: &str, roots: &[PathBuf], excludes: &[String], recursive: bool, 
         "bad-extensions" => bad_extensions(roots, excludes, recursive, cancel),
         "broken-files" => broken_files(roots, excludes, recursive, cancel),
         "bad-names" => bad_names(roots, excludes, recursive, cancel),
+        "silent-videos" => silent_videos(roots, excludes, recursive, cancel),
         _ => Vec::new(),
     }
 }
@@ -327,4 +329,233 @@ fn bad_names(roots: &[PathBuf], excludes: &[String], recursive: bool, cancel: &A
         }
     }
     out
+}
+
+/* ---------------- 无声视频 ---------------- */
+
+const SILENCE_DB: f64 = -50.0;
+const AUDIO_SAMPLE_SECS: f64 = 8.0;
+const SILENT_CACHE_VER: u32 = 1;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SilentCache {
+    #[serde(default)]
+    ver: u32,
+    size: u64,
+    mtime: u64,
+    verdict: String,
+    detail: String,
+}
+
+struct AudioInfo {
+    has_audio: bool,
+    duration: f64,
+}
+
+fn silent_cache_path(p: &Path) -> PathBuf {
+    crate::thumb_root()
+        .join(crate::scanner::path_key(p))
+        .join("silent.json")
+}
+
+fn load_silent_cache(p: &Path) -> Option<(String, String)> {
+    let txt = std::fs::read_to_string(silent_cache_path(p)).ok()?;
+    let c: SilentCache = serde_json::from_str(&txt).ok()?;
+    let md = std::fs::metadata(p).ok()?;
+    if c.ver != SILENT_CACHE_VER || c.size != md.len() || c.mtime != crate::cache::mtime(p) {
+        return None;
+    }
+    Some((c.verdict, c.detail))
+}
+
+fn save_silent_cache(p: &Path, verdict: &str, detail: &str) {
+    let file = silent_cache_path(p);
+    if let Some(parent) = file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let Ok(md) = std::fs::metadata(p) else {
+        return;
+    };
+    let c = SilentCache {
+        ver: SILENT_CACHE_VER,
+        size: md.len(),
+        mtime: crate::cache::mtime(p),
+        verdict: verdict.to_string(),
+        detail: detail.to_string(),
+    };
+    if let Ok(txt) = serde_json::to_string(&c) {
+        let _ = std::fs::write(file, txt);
+    }
+}
+
+fn audio_info(p: &Path, cancel: &AtomicBool) -> Option<AudioInfo> {
+    let out = crate::media::output_timeout_cancel(
+        {
+            let mut c = crate::media::cmd("ffprobe");
+            c.args([
+                "-v", "error",
+                "-print_format", "json",
+                "-show_streams",
+                "-show_format",
+            ])
+            .arg(p);
+            c
+        },
+        30,
+        Some(cancel),
+    )
+    .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let streams = v["streams"].as_array()?;
+    let has_audio = streams.iter().any(|s| s["codec_type"] == "audio");
+    let duration = v["format"]["duration"]
+        .as_str()
+        .and_then(|x| x.parse::<f64>().ok())
+        .or_else(|| {
+            streams
+                .iter()
+                .find(|s| s["codec_type"] == "audio")
+                .and_then(|s| s["duration"].as_str())
+                .and_then(|x| x.parse::<f64>().ok())
+        })
+        .unwrap_or(0.0);
+    Some(AudioInfo { has_audio, duration })
+}
+
+/// 首 / 中 / 尾抽样，避免为几分钟的视频解码整段音轨
+fn volume_points(duration: f64) -> Vec<f64> {
+    if duration <= 0.0 || duration <= AUDIO_SAMPLE_SECS {
+        return vec![0.0];
+    }
+    let mid = (duration - AUDIO_SAMPLE_SECS) / 2.0;
+    let end = duration - AUDIO_SAMPLE_SECS;
+    let mut out = vec![0.0, mid];
+    if end > mid + 1.0 {
+        out.push(end);
+    }
+    out
+}
+
+fn max_volume_db(p: &Path, at: f64, cancel: &AtomicBool) -> Option<f64> {
+    let out = crate::media::output_timeout_cancel(
+        {
+            let mut c = crate::media::cmd("ffmpeg");
+            c.args(["-hide_banner", "-nostats", "-ss", &format!("{at:.2}")])
+                .arg("-i")
+                .arg(p)
+                .args(["-t", &format!("{AUDIO_SAMPLE_SECS:.1}")])
+                .args(["-vn", "-af", "volumedetect", "-f", "null", "-"]);
+            c
+        },
+        30,
+        Some(cancel),
+    )
+    .ok()?;
+    let err = String::from_utf8_lossy(&out.stderr);
+    err.lines().find_map(|line| {
+        let rest = line.split("max_volume:").nth(1)?;
+        let val = rest.trim().split_whitespace().next()?;
+        if val.starts_with("-inf") {
+            return Some(-999.0);
+        }
+        val.parse::<f64>().ok()
+    })
+}
+
+fn detect_silent(p: &Path, cancel: &AtomicBool) -> Option<(String, String)> {
+    if let Some(v) = load_silent_cache(p) {
+        return Some(v);
+    }
+    let info = audio_info(p, cancel)?;
+    let result = if !info.has_audio {
+        ("no-audio".to_string(), "无音轨".to_string())
+    } else {
+        let mut sampled = false;
+        let mut peak = f64::NEG_INFINITY;
+        for at in volume_points(info.duration) {
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
+            if let Some(db) = max_volume_db(p, at, cancel) {
+                sampled = true;
+                peak = peak.max(db);
+            }
+        }
+        if !sampled {
+            return None;
+        }
+        if peak <= SILENCE_DB {
+            let detail = if peak <= -90.0 {
+                "静音 · 无有效声音".to_string()
+            } else {
+                format!("静音 · 峰值 {peak:.0} dB")
+            };
+            ("silent".to_string(), detail)
+        } else {
+            ("has-audio".to_string(), format!("有声音 · 峰值 {peak:.0} dB"))
+        }
+    };
+    save_silent_cache(p, &result.0, &result.1);
+    Some(result)
+}
+
+fn silent_videos(
+    roots: &[PathBuf],
+    excludes: &[String],
+    recursive: bool,
+    cancel: &AtomicBool,
+) -> Vec<Item> {
+    let files: Vec<PathBuf> = walk_files(roots, excludes, recursive, cancel)
+        .into_iter()
+        .filter(|p| {
+            matches!(
+                ext_of(p).as_str(),
+                "mp4" | "mov" | "mkv" | "avi" | "webm" | "m4v" | "flv" | "wmv" | "mpg"
+                    | "mpeg" | "ts" | "mts" | "m2ts" | "3gp" | "rmvb"
+            )
+        })
+        .collect();
+    if files.is_empty() {
+        return Vec::new();
+    }
+
+    let workers = crate::config::workers().min(files.len()).max(1);
+    let next = AtomicUsize::new(0);
+    let (tx, rx) = std::sync::mpsc::channel::<(usize, Option<Item>)>();
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let tx = tx.clone();
+            let files = &files;
+            let next = &next;
+            scope.spawn(move || loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                if i >= files.len() || cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let p = &files[i];
+                let found = detect_silent(p, cancel).and_then(|(verdict, detail)| {
+                    if verdict == "has-audio" {
+                        None
+                    } else {
+                        Some(item(p, detail, "silent"))
+                    }
+                });
+                let _ = tx.send((i, found));
+            });
+        }
+        drop(tx);
+
+        let mut found: Vec<(usize, Item)> = Vec::new();
+        for (i, it) in rx {
+            if let Some(it) = it {
+                found.push((i, it));
+            }
+        }
+        found.sort_by_key(|(i, _)| *i);
+        found.into_iter().map(|(_, it)| it).collect()
+    })
 }

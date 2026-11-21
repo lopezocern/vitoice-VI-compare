@@ -219,6 +219,7 @@ fn tool_list() -> Vec<ToolMeta> {
         mk("similar-images",   "相似图像",       "▣", "media"),
         mk("similar-videos",   "相似视频",       "▶", "media"),
         mk("same-music",       "重复音乐",       "♫", "media"),
+        mk("silent-videos",    "无声视频",       "",  "media"),
         mk("invalid-symlinks", "无效的符号链接", "⤳", "advanced"),
         mk("broken-files",     "损坏的文件",     "⚠", "advanced"),
         mk("bad-extensions",   "错误的扩展名",   "⌥", "advanced"),

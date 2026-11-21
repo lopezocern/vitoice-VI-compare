@@ -140,7 +140,7 @@ Tauri 2 会把前端传入的 camelCase 参数映射到 Rust 的 snake_case 参�
 
 | 分类 | 命令 | 入参 → 返回 |
 |---|---|---|
-| 元信息 | `tool_list` | — → `ToolMeta[]`（14 个工具 + `implemented`） |
+| 元信息 | `tool_list` | — → `ToolMeta[]`（15 个工具 + `implemented`） |
 | | `ping` / `app_version` / `dev_flags` | — → 字符串 / JSON |
 | 扫描 | `scan_start` | `path, sim?, tool?` → `()` |
 | | `scan_start_scope` | `includes, excludes, sim?, tool?, recursive?` → `()` |
@@ -239,7 +239,7 @@ Tauri 2 会把前端传入的 camelCase 参数映射到 Rust 的 snake_case 参�
 | **M2.1** | 召回：pHash 替代 dHash，时长分桶 + 连续匹配段 | ✅ |
 | **M3** | 并发与缓存：worker 池 + `meta.json` 缓存 | ✅ |
 | **M4** | 决策：隔离区、manifest、撤销、批次统计 | ✅ |
-| **M5** | 工具铺开：14 个工具全部可用 | ✅ |
+| **M5** | 工具铺开：15 个工具全部可用 | ✅ |
 | **M6** | 性能：两阶段扫描、重复文件并发哈希 | ✅ |
 | **M7** | 性能：JPEG 1/8 解码缩放、缩略图尺寸下调 | ⬜ |
 
