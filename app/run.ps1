@@ -1,15 +1,19 @@
-# 启动 VideoCC（开发模式）
+# 启动 VitoiceCompare（开发模式）
 #
-# 为什么把 target 目录放到工作区外：
-#   本机 `G:\Code\vitoice_videoCC` 目录上残留了 DSH 沙箱注入的 ACL（Everyone DENY DELETE
-#   + 一条 S-1-4-... 的沙箱 SID ACE）。WebView2 在该目录下初始化渲染进程会返回
-#   HRESULT 0x800700AA (ERROR_BUSY)，窗口起不来。构建产物放到工作区外即可正常运行。
-#
-#   如果想改回默认（产物在 src-tauri/target），删掉下面这行即可，但当前目录下会失败。
+# 构建目录默认放在工作区外，便于避开某些机器上沙箱注入的 ACL
+# （Everyone DENY DELETE 会导致 WebView2 初始化失败，报 HRESULT 0x800700AA）。
+# 没有 G: 盘的机器会自动退回默认的 src-tauri\target；
+# 也可以用环境变量 CARGO_TARGET_DIR 自行指定。
 
 $ErrorActionPreference = 'Stop'
-$env:CARGO_TARGET_DIR = 'G:\Code\videocc-target'
+if (-not $env:CARGO_TARGET_DIR) {
+    $outside = 'G:\Code\videocc-target'
+    if (Test-Path (Split-Path $outside -Parent)) {
+        $env:CARGO_TARGET_DIR = $outside
+    }
+}
+$target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path (Join-Path $PSScriptRoot 'src-tauri') 'target' }
 
 Set-Location (Join-Path $PSScriptRoot 'src-tauri')
-Write-Host "构建目录: $env:CARGO_TARGET_DIR" -ForegroundColor DarkGray
+Write-Host "构建目录: $target" -ForegroundColor DarkGray
 cargo run

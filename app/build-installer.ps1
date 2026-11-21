@@ -6,8 +6,12 @@
 $ErrorActionPreference = 'Stop'
 
 if (-not $env:CARGO_TARGET_DIR) {
-    $env:CARGO_TARGET_DIR = 'G:\Code\videocc-release'
+    $outside = 'G:\Code\videocc-release'
+    if (Test-Path (Split-Path $outside -Parent)) {
+        $env:CARGO_TARGET_DIR = $outside
+    }
 }
+$target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path (Join-Path $PSScriptRoot 'src-tauri') 'target' }
 # 关闭 LTO 缩短构建时间（运行性能差异在 5% 以内）
 if (-not $env:CARGO_PROFILE_RELEASE_LTO) {
     $env:CARGO_PROFILE_RELEASE_LTO = 'false'
@@ -15,11 +19,11 @@ if (-not $env:CARGO_PROFILE_RELEASE_LTO) {
 }
 
 Set-Location $PSScriptRoot
-Write-Host "构建目录: $env:CARGO_TARGET_DIR" -ForegroundColor DarkGray
+Write-Host "构建目录: $target" -ForegroundColor DarkGray
 
 tauri build --bundles nsis
 
-$setup = Get-ChildItem (Join-Path $env:CARGO_TARGET_DIR 'release\bundle\nsis') -Filter '*-setup.exe' |
+$setup = Get-ChildItem (Join-Path $target 'release\bundle\nsis') -Filter '*-setup.exe' |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
