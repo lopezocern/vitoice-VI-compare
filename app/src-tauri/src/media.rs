@@ -26,7 +26,7 @@ pub struct Extracted {
 }
 
 /// 带超时地运行子进程，避免坏文件把 ffmpeg 卡死导致整个扫描僵住
-pub fn output_timeout(mut cmd: std::process::Command, secs: u64) -> Result<std::process::Output, String> {
+pub fn output_timeout(cmd: std::process::Command, secs: u64) -> Result<std::process::Output, String> {
     output_timeout_cancel(cmd, secs, None)
 }
 
@@ -58,6 +58,14 @@ pub fn output_timeout_cancel(
                 return Ok(std::process::Output { status, stdout, stderr });
             }
             Ok(None) => {
+                if cancel
+                    .map(|c| c.load(std::sync::atomic::Ordering::Relaxed))
+                    .unwrap_or(false)
+                {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("已取消".to_string());
+                }
                 if started.elapsed().as_secs() >= secs {
                     let _ = child.kill();
                     let _ = child.wait();
@@ -185,7 +193,7 @@ pub fn phash64(gray: &[u8]) -> u64 {
     h
 }
 
-/// 一次解码同时产出：8 帧展示用 JPEG + 每帧 9x8 灰度原图（用于 dHash）。
+/// 一次解码同时产出：展示用 JPEG + 每帧 32x32 灰度数据（用于 pHash）。
 pub fn extract(
     input: &Path,
     out_dir: &Path,
@@ -194,6 +202,52 @@ pub fn extract(
     max_frames: usize,
     sec_per_frame: f32,
     cancel: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<Extracted, String> {
+    extract_impl(
+        input, out_dir, duration, min_frames, max_frames, sec_per_frame, cancel, true, true,
+    )
+}
+
+/// 两阶段扫描的第一阶段：只算哈希，不写展示帧。
+pub fn extract_hashes(
+    input: &Path,
+    out_dir: &Path,
+    duration: f32,
+    min_frames: usize,
+    max_frames: usize,
+    sec_per_frame: f32,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<Extracted, String> {
+    extract_impl(
+        input, out_dir, duration, min_frames, max_frames, sec_per_frame, cancel, false, true,
+    )
+}
+
+/// 两阶段扫描的第二阶段：只为进入分组的文件补展示帧。
+pub fn extract_frames(
+    input: &Path,
+    out_dir: &Path,
+    duration: f32,
+    min_frames: usize,
+    max_frames: usize,
+    sec_per_frame: f32,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<Extracted, String> {
+    extract_impl(
+        input, out_dir, duration, min_frames, max_frames, sec_per_frame, cancel, true, false,
+    )
+}
+
+fn extract_impl(
+    input: &Path,
+    out_dir: &Path,
+    duration: f32,
+    min_frames: usize,
+    max_frames: usize,
+    sec_per_frame: f32,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+    want_frames: bool,
+    want_hashes: bool,
 ) -> Result<Extracted, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("创建缓存目录失败: {e}"))?;
 
@@ -211,10 +265,22 @@ pub fn extract(
     let raw_path = out_dir.join("raw.bin");
     let _ = std::fs::remove_file(&raw_path);
 
-    let filter = format!(
-        "[0:v]fps={fps:.6},scale=160:90:force_original_aspect_ratio=decrease,pad=160:90:(ow-iw)/2:(oh-ih)/2:color=black[jpg];\
-         [0:v]fps={fps:.6},scale=32:32,format=gray[raw]"
+    if want_frames {
+        // 清掉旧帧，避免帧数变化后残留多余图片
+        if let Ok(rd) = std::fs::read_dir(out_dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.extension().map(|x| x == "jpg").unwrap_or(false) {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        }
+    }
+
+    let frames_filter = format!(
+        "[0:v]fps={fps:.6},scale=160:90:force_original_aspect_ratio=decrease,pad=160:90:(ow-iw)/2:(oh-ih)/2:color=black[jpg]"
     );
+    let raw_filter = format!("[0:v]fps={fps:.6},scale=32:32,format=gray[raw]");
 
     let status = output_timeout_cancel(
         {
@@ -222,12 +288,24 @@ pub fn extract(
             c.args(["-hide_banner", "-loglevel", "error", "-y"])
                 .args(["-threads", "2"])
                 .arg("-i")
-                .arg(input)
-                .args(["-filter_complex", &filter])
-                .args(["-map", "[jpg]", "-q:v", "5"])
-                .arg(&jpg_pat)
-                .args(["-map", "[raw]", "-f", "rawvideo", "-pix_fmt", "gray"])
-                .arg(&raw_path);
+                .arg(input);
+
+            if want_frames && want_hashes {
+                let filter = format!("{frames_filter};{raw_filter}");
+                c.args(["-filter_complex", &filter])
+                    .args(["-map", "[jpg]", "-q:v", "5"])
+                    .arg(&jpg_pat)
+                    .args(["-map", "[raw]", "-f", "rawvideo", "-pix_fmt", "gray"])
+                    .arg(&raw_path);
+            } else if want_frames {
+                c.args(["-filter_complex", &frames_filter])
+                    .args(["-map", "[jpg]", "-q:v", "5"])
+                    .arg(&jpg_pat);
+            } else {
+                c.args(["-filter_complex", &raw_filter])
+                    .args(["-map", "[raw]", "-f", "rawvideo", "-pix_fmt", "gray"])
+                    .arg(&raw_path);
+            }
             c
         },
         180,
@@ -239,26 +317,31 @@ pub fn extract(
         return Err(format!("ffmpeg 抽帧失败: {}", msg.lines().next().unwrap_or("未知错误")));
     }
 
-    let raw = std::fs::read(&raw_path).map_err(|e| format!("读取哈希数据失败: {e}"))?;
-    let frame_size = 32 * 32;
-    let count = raw.len() / frame_size;
-
-    let mut hashes = Vec::with_capacity(count);
-    for i in 0..count {
-        hashes.push(phash64(&raw[i * frame_size..(i + 1) * frame_size]));
+    let mut hashes = Vec::new();
+    if want_hashes {
+        let raw = std::fs::read(&raw_path).map_err(|e| format!("读取哈希数据失败: {e}"))?;
+        let frame_size = 32 * 32;
+        let count = raw.len() / frame_size;
+        hashes.reserve(count);
+        for i in 0..count {
+            hashes.push(phash64(&raw[i * frame_size..(i + 1) * frame_size]));
+        }
+        let _ = std::fs::remove_file(&raw_path);
     }
 
-    let mut frames: Vec<PathBuf> = std::fs::read_dir(out_dir)
-        .map_err(|e| format!("读取缓存目录失败: {e}"))?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().map(|x| x == "jpg").unwrap_or(false))
-        .collect();
-    frames.sort();
+    let mut frames: Vec<PathBuf> = Vec::new();
+    if want_frames {
+        frames = std::fs::read_dir(out_dir)
+            .map_err(|e| format!("读取缓存目录失败: {e}"))?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|x| x == "jpg").unwrap_or(false))
+            .collect();
+        frames.sort();
+    }
 
-    let times: Vec<f32> = (0..hashes.len()).map(|i| (i as f32 + 0.5) * interval).collect();
-
-    let _ = std::fs::remove_file(&raw_path);
+    let count = if want_hashes { hashes.len() } else { n };
+    let times: Vec<f32> = (0..count).map(|i| (i as f32 + 0.5) * interval).collect();
 
     Ok(Extracted { hashes, frames, times })
 }

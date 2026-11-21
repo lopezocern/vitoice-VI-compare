@@ -1,17 +1,8 @@
 use crate::model::Item;
+use crate::walk;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::path::{Path, PathBuf};
-
-const RESERVED: &[&str] = &["_optimized", "_clean", "_backup"];
-
-fn is_reserved(p: &std::path::Path) -> bool {
-    p.components().any(|c| {
-        let s = c.as_os_str().to_string_lossy().to_ascii_lowercase();
-        RESERVED.contains(&s.as_str())
-    })
-}
-
 
 pub const IMPLEMENTED: &[&str] = &[
     "duplicates",
@@ -30,52 +21,13 @@ pub const IMPLEMENTED: &[&str] = &[
     "video-optimizer",
 ];
 
-fn norm(p: &Path) -> String {
-    p.to_string_lossy().replace('/', "\\").to_lowercase().trim_end_matches('\\').to_string()
-}
-
-fn excluded(p: &Path, excludes: &[String]) -> bool {
-    if excludes.is_empty() {
-        return false;
-    }
-    let s = norm(p);
-    excludes
-        .iter()
-        .filter(|e| !e.is_empty())
-        .any(|e| s == *e || s.starts_with(&format!("{e}\\")))
-}
-
 fn walkdir_all(roots: &[PathBuf], excludes: &[String], recursive: bool, cancel: &AtomicBool) -> Vec<(PathBuf, bool)> {
-    let mut out = Vec::new();
-    let mut n = 0usize;
-    for root in roots {
-        let mut walker = walkdir::WalkDir::new(root).follow_links(false);
-        if !recursive {
-            walker = walker.max_depth(1);
-        }
-        for e in walker
-            .into_iter()
-            .filter_map(|r| r.ok())
-        {
-            n += 1;
-            if n % 256 == 0 && cancel.load(Ordering::Relaxed) {
-                return out;
-            }
-            let p = e.path().to_path_buf();
-            if is_reserved(&p) || excluded(&p, excludes) {
-                continue;
-            }
-            let is_dir = e.file_type().is_dir();
-            out.push((p, is_dir));
-        }
-    }
-    out
+    walk::walk(roots, excludes, recursive, true, Some(cancel))
 }
 
 fn walk_files(roots: &[PathBuf], excludes: &[String], recursive: bool, cancel: &AtomicBool) -> Vec<PathBuf> {
-    walkdir_all(roots, excludes, recursive, cancel)
+    walk::walk(roots, excludes, recursive, false, Some(cancel))
         .into_iter()
-        .filter(|(_, d)| !*d)
         .map(|(p, _)| p)
         .collect()
 }
@@ -117,6 +69,38 @@ fn hash_file(p: &Path) -> Option<String> {
     Some(hasher.finalize().to_hex().to_string())
 }
 
+/// 并发计算整文件哈希；结果按输入顺序返回，取消时剩余项为 None。
+fn hash_files_parallel(files: &[PathBuf], cancel: &AtomicBool) -> Vec<Option<String>> {
+    let mut out: Vec<Option<String>> = Vec::new();
+    out.resize_with(files.len(), || None);
+    if files.is_empty() {
+        return out;
+    }
+
+    let workers = crate::config::workers().min(files.len()).max(1);
+    let next = AtomicUsize::new(0);
+    let (tx, rx) = std::sync::mpsc::channel::<(usize, Option<String>)>();
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let tx = tx.clone();
+            let next = &next;
+            scope.spawn(move || loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                if i >= files.len() || cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let _ = tx.send((i, hash_file(&files[i])));
+            });
+        }
+        drop(tx);
+        for (i, h) in rx {
+            out[i] = h;
+        }
+    });
+    out
+}
+
 pub fn run(tool: &str, roots: &[PathBuf], excludes: &[String], recursive: bool, cancel: &AtomicBool) -> Vec<Item> {
     match tool {
         "duplicates" => duplicates(roots, excludes, recursive, cancel),
@@ -142,33 +126,39 @@ fn duplicates(roots: &[PathBuf], excludes: &[String], recursive: bool, cancel: &
         }
     }
 
+    // 只对同大小的候选算哈希，并发执行
+    let mut candidates: Vec<PathBuf> = by_size
+        .into_values()
+        .filter(|v| v.len() >= 2)
+        .flatten()
+        .collect();
+    candidates.sort();
+
+    let mut by_hash: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let hashes = hash_files_parallel(&candidates, cancel);
+    for (p, h) in candidates.into_iter().zip(hashes) {
+        if let Some(h) = h {
+            by_hash.entry(h).or_default().push(p);
+        }
+    }
+
     let mut out = Vec::new();
     let mut group_no = 0;
-    for (size, paths) in by_size {
-        if paths.len() < 2 {
+    for (_, mut same) in by_hash {
+        if same.len() < 2 {
             continue;
         }
-        let mut by_hash: HashMap<String, Vec<PathBuf>> = HashMap::new();
-        for p in paths {
-            if let Some(h) = hash_file(&p) {
-                by_hash.entry(h).or_default().push(p);
-            }
-        }
-        for (_, mut same) in by_hash {
-            if same.len() < 2 {
-                continue;
-            }
-            same.sort();
-            group_no += 1;
-            let n = same.len();
-            for (i, p) in same.iter().enumerate() {
-                let tag = if i == 0 { "（建议保留）" } else { "" };
-                out.push(item(
-                    p,
-                    format!("重复组 {group_no} · 共 {n} 个副本 · {} {tag}", human_size(size)),
-                    "duplicate",
-                ));
-            }
+        same.sort();
+        group_no += 1;
+        let n = same.len();
+        let size = std::fs::metadata(&same[0]).map(|m| m.len()).unwrap_or(0);
+        for (i, p) in same.iter().enumerate() {
+            let tag = if i == 0 { "（建议保留）" } else { "" };
+            out.push(item(
+                p,
+                format!("重复组 {group_no} · 共 {n} 个副本 · {} {tag}", human_size(size)),
+                "duplicate",
+            ));
         }
     }
     out.sort_by(|a, b| a.detail.cmp(&b.detail));

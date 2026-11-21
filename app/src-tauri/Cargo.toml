@@ -5,6 +5,7 @@ description = "VitoiceCompare - 视频素材去重与整理"
 authors = ["vitoice"]
 edition = "2021"
 rust-version = "1.77"
+default-run = "vitoicecompare"
 
 [lib]
 name = "vitoicecompare_lib"

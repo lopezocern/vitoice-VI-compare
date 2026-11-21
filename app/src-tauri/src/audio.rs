@@ -1,4 +1,5 @@
 use crate::model::Item;
+use crate::walk;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -13,49 +14,19 @@ pub struct AudioFp {
     pub rms: Vec<f32>,
 }
 
-fn norm(p: &Path) -> String {
-    p.to_string_lossy().replace('/', "\\").to_lowercase().trim_end_matches('\\').to_string()
-}
-
-fn excluded(p: &Path, excludes: &[String]) -> bool {
-    let s = norm(p);
-    excludes
-        .iter()
-        .filter(|e| !e.is_empty())
-        .any(|e| s == *e || s.starts_with(&format!("{e}\\")))
-}
-
-fn is_reserved(p: &Path) -> bool {
-    const R: &[&str] = &["_optimized", "_clean", "_backup"];
-    p.components().any(|c| {
-        let s = c.as_os_str().to_string_lossy().to_ascii_lowercase();
-        R.contains(&s.as_str())
-    })
-}
-
 pub fn collect(roots: &[PathBuf], excludes: &[String], recursive: bool) -> Vec<PathBuf> {
-    let mut seen = std::collections::HashSet::new();
-    let mut out = Vec::new();
-    for root in roots {
-        let mut w = walkdir::WalkDir::new(root).follow_links(false);
-        if !recursive {
-            w = w.max_depth(1);
-        }
-        for e in w.into_iter().filter_map(|r| r.ok()) {
-            if !e.file_type().is_file() {
-                continue;
-            }
-            let p = e.path();
-            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
-            if !AUDIO_EXT.contains(&ext.as_str()) || is_reserved(p) || excluded(p, excludes) {
-                continue;
-            }
-            if seen.insert(norm(p)) {
-                out.push(p.to_path_buf());
-            }
-        }
-    }
-    out
+    walk::walk(roots, excludes, recursive, false, None)
+        .into_iter()
+        .map(|(p, _)| p)
+        .filter(|p| {
+            let ext = p
+                .extension()
+                .and_then(|x| x.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            AUDIO_EXT.contains(&ext.as_str())
+        })
+        .collect()
 }
 
 /// 解码成 8k 单声道，按 0.25s 窗口取 RMS 包络
@@ -173,6 +144,9 @@ pub fn group(fps: &[AudioFp]) -> Vec<(Vec<usize>, u8)> {
         buckets.entry(f.duration.round() as i32).or_default().push(i);
     }
 
+    // 单桶候选上限；超过时按相近时长窗口比较，而不是整桶跳过
+    const MAX_POOL: usize = 400;
+
     for (&sec, idxs) in buckets.clone().iter() {
         let mut pool: Vec<usize> = idxs.clone();
         for d in [sec - 1, sec + 1] {
@@ -185,22 +159,37 @@ pub fn group(fps: &[AudioFp]) -> Vec<(Vec<usize>, u8)> {
         if pool.len() < 2 {
             continue;
         }
-        if pool.len() > 400 {
-            continue;
+
+        fn consider(a: usize, b: usize, fps: &[AudioFp], parent: &mut Vec<usize>) {
+            if fps[a].duration.max(1.0) / fps[b].duration.max(1.0) > 1.03 {
+                return;
+            }
+            if similarity(&fps[a], &fps[b]) > 0.95 {
+                let ra = find(&mut *parent, a);
+                let rb = find(&mut *parent, b);
+                if ra != rb {
+                    parent[rb] = ra;
+                }
+            }
         }
 
-        for i in 0..pool.len() {
-            for j in (i + 1)..pool.len() {
-                let a = pool[i];
-                let b = pool[j];
-                if fps[a].duration.max(1.0) / fps[b].duration.max(1.0) > 1.03 {
-                    continue;
+        if pool.len() <= MAX_POOL {
+            for i in 0..pool.len() {
+                for j in (i + 1)..pool.len() {
+                    consider(pool[i], pool[j], fps, &mut parent);
                 }
-                if similarity(&fps[a], &fps[b]) > 0.95 {
-                    let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
-                    if ra != rb {
-                        parent[rb] = ra;
-                    }
+            }
+        } else {
+            pool.sort_by(|&x, &y| {
+                fps[x]
+                    .duration
+                    .partial_cmp(&fps[y].duration)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for i in 0..pool.len() {
+                let end = (i + MAX_POOL + 1).min(pool.len());
+                for j in (i + 1)..end {
+                    consider(pool[i], pool[j], fps, &mut parent);
                 }
             }
         }

@@ -56,6 +56,7 @@ pub struct ScanSummary {
     pub groups: usize,
     pub files: usize,
     pub matched_files: usize,
+    pub failed: usize,
     pub elapsed_ms: u64,
 }
 
@@ -66,13 +67,4 @@ pub struct Item {
     pub size: u64,
     pub detail: String,
     pub kind: String,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct ToolResult {
-    pub tool: String,
-    pub items: Vec<Item>,
-    pub groups: Vec<GroupSummary>,
-    pub total_files: usize,
-    pub elapsed_ms: u64,
 }

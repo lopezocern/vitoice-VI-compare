@@ -1,16 +1,7 @@
 use crate::media::{self, Probe};
+use crate::walk;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
-const RESERVED: &[&str] = &["_optimized", "_clean", "_backup"];
-
-fn is_reserved(p: &std::path::Path) -> bool {
-    p.components().any(|c| {
-        let s = c.as_os_str().to_string_lossy().to_ascii_lowercase();
-        RESERVED.contains(&s.as_str())
-    })
-}
-
 
 #[derive(Clone)]
 pub struct VideoRecord {
@@ -25,95 +16,21 @@ const VIDEO_EXTS: &[&str] = &[
     "mp4", "mov", "mkv", "avi", "webm", "m4v", "wmv", "flv", "mpg", "mpeg", "ts",
 ];
 
-pub fn collect_videos(root: &Path, out: &mut Vec<PathBuf>) {
-    for entry in walkdir::WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let ext = entry
-            .path()
-            .extension()
-            .and_then(|x| x.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if VIDEO_EXTS.contains(&ext.as_str()) {
-            out.push(entry.path().to_path_buf());
-        }
-    }
-}
-
-fn norm(p: &Path) -> String {
-    let s = p.to_string_lossy().replace('/', "\\").to_lowercase();
-    s.trim_end_matches('\\').to_string()
-}
-
-fn is_excluded(path: &Path, excludes: &[String]) -> bool {
-    if excludes.is_empty() {
-        return false;
-    }
-    let p = norm(path);
-    excludes.iter().any(|e| {
-        if e.is_empty() {
-            return false;
-        }
-        p == *e || p.starts_with(&format!("{e}\\"))
-    })
-}
-
 /// 多根目录 + 排除集；自动去重（嵌套包含不会重复遍历）
 /// `recursive = false` 时只扫描根目录第一层的文件
 pub fn collect_videos_scoped(roots: &[PathBuf], excludes: &[String], recursive: bool) -> Vec<PathBuf> {
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out = Vec::new();
-
-    // 去掉被其他包含目录覆盖的子目录
-let mut sorted: Vec<PathBuf> = roots.to_vec();
-    sorted.sort_by_key(|p| p.components().count());
-
-    let mut effective: Vec<PathBuf> = Vec::new();
-    for r in sorted {
-        let rn = norm(&r);
-        let covered = effective.iter().any(|e| {
-            let en = norm(e);
-            rn == en || rn.starts_with(&format!("{en}\\"))
-        });
-        if !covered && r.is_dir() {
-            effective.push(r);
-        }
-    }
-
-    for root in effective {
-        let mut walker = walkdir::WalkDir::new(&root).follow_links(false);
-        if !recursive {
-            walker = walker.max_depth(1);
-        }
-        for entry in walker.into_iter().filter_map(|e| e.ok()) {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let p = entry.path();
-            if is_reserved(p) || is_excluded(p, excludes) {
-                continue;
-            }
+    walk::walk(roots, excludes, recursive, false, None)
+        .into_iter()
+        .map(|(p, _)| p)
+        .filter(|p| {
             let ext = p
                 .extension()
                 .and_then(|x| x.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
-            if !VIDEO_EXTS.contains(&ext.as_str()) {
-                continue;
-            }
-            let key = norm(p);
-            if seen.insert(key) {
-                out.push(p.to_path_buf());
-            }
-        }
-    }
-    out
+            VIDEO_EXTS.contains(&ext.as_str())
+        })
+        .collect()
 }
 
 pub fn path_key(p: &Path) -> String {
@@ -254,6 +171,8 @@ pub fn group_records(records: &[VideoRecord], sim: u8) -> Vec<(Vec<usize>, u8)> 
 
     let threshold = sim as f32 / 100.0;
     let mut seen: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    // 单桶候选上限；超过时改为按时长排序后与邻近候选比较，而不是整桶跳过
+    const MAX_POOL: usize = 700;
 
     for (&b, idxs) in buckets.iter() {
         let mut pool: Vec<usize> = idxs.clone();
@@ -264,36 +183,62 @@ pub fn group_records(records: &[VideoRecord], sim: u8) -> Vec<(Vec<usize>, u8)> 
         }
         pool.sort();
         pool.dedup();
-        if pool.len() < 2 || pool.len() > 700 {
+        if pool.len() < 2 {
             continue;
         }
 
-        for i in 0..pool.len() {
-            for j in (i + 1)..pool.len() {
-                let a = pool[i];
-                let c = pool[j];
-                let da = records[a].meta.duration;
-                let db = records[c].meta.duration;
-                if da > 0.0 && db > 0.0 {
-                    let ratio = da.max(db) / da.min(db);
-                    if ratio > 1.6 {
-                        continue;
-                    }
+        fn consider(
+            a: usize,
+            c: usize,
+            records: &[VideoRecord],
+            parent: &mut [usize],
+            seen: &mut std::collections::HashSet<(usize, usize)>,
+            threshold: f32,
+        ) {
+            let da = records[a].meta.duration;
+            let db = records[c].meta.duration;
+            if da > 0.0 && db > 0.0 {
+                let ratio = da.max(db) / da.min(db);
+                if ratio > 1.6 {
+                    return;
                 }
-                let pair = (a.min(c), a.max(c));
-                if !seen.insert(pair) {
-                    continue;
+            }
+            let pair = (a.min(c), a.max(c));
+            if !seen.insert(pair) {
+                return;
+            }
+            let s = score(&records[a].hashes, &records[c].hashes);
+            if s.total < 4 || s.matched < 4 {
+                return;
+            }
+            let rate = s.matched as f32 / s.total as f32;
+            // 整段高相似，或存在足够长的连续匹配段（应对局部相同的剪辑）
+            let run_ok = s.longest_run >= 6
+                && (s.longest_run as f32) >= (s.total as f32) * 0.35;
+            if rate >= threshold || run_ok {
+                union(parent, a, c);
+            }
+        }
+
+        if pool.len() <= MAX_POOL {
+            for i in 0..pool.len() {
+                for j in (i + 1)..pool.len() {
+                    consider(pool[i], pool[j], records, &mut parent, &mut seen, threshold);
                 }
-                let s = score(&records[a].hashes, &records[c].hashes);
-                if s.total < 4 || s.matched < 4 {
-                    continue;
-                }
-                let rate = s.matched as f32 / s.total as f32;
-                // 整段高相似，或存在足够长的连续匹配段（应对局部相同的剪辑）
-                let run_ok = s.longest_run >= 6
-                    && (s.longest_run as f32) >= (s.total as f32) * 0.35;
-                if rate >= threshold || run_ok {
-                    union(&mut parent, a, c);
+            }
+        } else {
+            // 大桶按时长排序，同源版本时长高度接近，比较邻近窗口即可覆盖
+            pool.sort_by(|&x, &y| {
+                records[x]
+                    .meta
+                    .duration
+                    .partial_cmp(&records[y].meta.duration)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for i in 0..pool.len() {
+                let end = (i + MAX_POOL + 1).min(pool.len());
+                for j in (i + 1)..end {
+                    consider(pool[i], pool[j], records, &mut parent, &mut seen, threshold);
                 }
             }
         }

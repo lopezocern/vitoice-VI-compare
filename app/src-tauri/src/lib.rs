@@ -8,13 +8,14 @@ pub mod media;
 mod model;
 pub mod scanner;
 mod tools;
+mod walk;
 
 use base64::Engine;
 use model::*;
 use scanner::VideoRecord;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -111,6 +112,14 @@ fn undo_core(batch: &str, trashed: &Mutex<std::collections::HashSet<String>>) ->
         if !dst.exists() {
             continue;
         }
+        // 原位置已经有新文件时不覆盖，避免撤销反而破坏用户后来放入的内容
+        if src.exists() {
+            crate::logging::log(&format!(
+                "[undo] 原位置已有文件，跳过恢复: {}",
+                src.display()
+            ));
+            continue;
+        }
         if let Some(parent) = src.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -155,13 +164,32 @@ pub(crate) fn thumb_root() -> PathBuf {
 }
 
 fn data_url(p: &Path) -> String {
-    match std::fs::read(p) {
+    // 缓存已编码的缩略图：切换工具/重绘分组时避免反复读盘与 base64 编码
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, String>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    let key = p.to_string_lossy().to_string();
+
+    if let Some(v) = cache.lock().ok().and_then(|c| c.get(&key).cloned()) {
+        return v;
+    }
+
+    let url = match std::fs::read(p) {
         Ok(bytes) => format!(
             "data:image/jpeg;base64,{}",
             base64::engine::general_purpose::STANDARD.encode(bytes)
         ),
         Err(_) => String::new(),
+    };
+
+    if !url.is_empty() {
+        if let Ok(mut c) = cache.lock() {
+            if c.len() >= 512 {
+                c.clear();
+            }
+            c.insert(key, url.clone());
+        }
     }
+    url
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -238,6 +266,9 @@ fn job_start(
     files: Vec<jobs::JobFile>,
     first_root: String,
 ) -> Result<(), String> {
+    if state.scanning.load(Ordering::SeqCst) {
+        return Err("扫描进行中，请等待完成".to_string());
+    }
     if state.job_running.swap(true, Ordering::SeqCst) {
         return Err("已有任务在执行".to_string());
     }
@@ -426,11 +457,11 @@ fn worker_count() -> usize {
     config::workers()
 }
 
-fn process_one(file: &Path, cancel: &AtomicBool) -> Option<VideoRecord> {
+fn process_one(file: &Path, cancel: &AtomicBool) -> Result<VideoRecord, String> {
     let dir = thumb_root().join(scanner::path_key(file));
 
-    if let Some(c) = cache::load(&dir, file) {
-        return Some(VideoRecord {
+    if let Some(c) = cache::load_meta(&dir, file) {
+        return Ok(VideoRecord {
             path: file.to_path_buf(),
             meta: media::Probe {
                 width: c.width,
@@ -445,14 +476,8 @@ fn process_one(file: &Path, cancel: &AtomicBool) -> Option<VideoRecord> {
         });
     }
 
-    let meta = media::probe(file).ok()?;
-    let ex = media::extract(file, &dir, meta.duration, 8, 48, 2.0, Some(cancel)).ok()?;
-
-    let names: Vec<String> = ex
-        .frames
-        .iter()
-        .filter_map(|p| p.file_name().and_then(|x| x.to_str()).map(|s| s.to_string()))
-        .collect();
+    let meta = media::probe(file)?;
+    let ex = media::extract_hashes(file, &dir, meta.duration, 8, 48, 2.0, Some(cancel))?;
 
     cache::save(
         &dir,
@@ -467,17 +492,171 @@ fn process_one(file: &Path, cancel: &AtomicBool) -> Option<VideoRecord> {
             bitrate: meta.bitrate,
             hashes: ex.hashes.clone(),
             times: ex.times.clone(),
-            frames: names,
+            frames: Vec::new(),
         },
     );
 
-    Some(VideoRecord {
+    Ok(VideoRecord {
         path: file.to_path_buf(),
         meta,
         hashes: ex.hashes,
-        frames: ex.frames,
+        frames: Vec::new(),
         times: ex.times,
     })
+}
+
+/// 两阶段扫描的第二阶段：只为进入分组的文件补展示帧。
+/// 未进入分组的文件不再生成缩略图，重复率低时能省掉大量编码与磁盘写入。
+fn ensure_group_frames(
+    records: &mut [VideoRecord],
+    groups: &[(Vec<usize>, u8)],
+    cancel: &AtomicBool,
+    app: &AppHandle,
+) -> usize {
+    let started = Instant::now();
+    let mut need: Vec<usize> = Vec::new();
+    for (members, _) in groups {
+        for &i in members {
+            let rec = &records[i];
+            if rec.frames.is_empty() || rec.frames.iter().any(|p| !p.exists()) {
+                need.push(i);
+            }
+        }
+    }
+    need.sort();
+    need.dedup();
+    if need.is_empty() {
+        return 0;
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return 0;
+    }
+
+    let jobs: Vec<(usize, PathBuf, f32)> = need
+        .iter()
+        .map(|&i| {
+            (
+                i,
+                records[i].path.clone(),
+                records[i].meta.duration,
+            )
+        })
+        .collect();
+
+    let total = jobs.len();
+    let workers = worker_count();
+    let next = AtomicUsize::new(0);
+    let done = AtomicUsize::new(0);
+    let last_emit = Mutex::new(Instant::now() - Duration::from_secs(5));
+    let mut ok = 0usize;
+    let mut failed = 0usize;
+
+    std::thread::scope(|scope| {
+        let (tx, rx) = std::sync::mpsc::channel::<(usize, Result<media::Extracted, String>)>();
+
+        for _ in 0..workers {
+            let tx = tx.clone();
+            let jobs = &jobs;
+            let next = &next;
+            let done = &done;
+            let last_emit = &last_emit;
+            let app = app.clone();
+
+            scope.spawn(move || loop {
+                let k = next.fetch_add(1, Ordering::Relaxed);
+                if k >= jobs.len() || cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let (idx, path, duration) = &jobs[k];
+                let dir = thumb_root().join(scanner::path_key(path));
+                let res = media::extract_frames(
+                    path,
+                    &dir,
+                    *duration,
+                    8,
+                    48,
+                    2.0,
+                    Some(cancel),
+                );
+                let _ = tx.send((*idx, res));
+                done.fetch_add(1, Ordering::Relaxed);
+
+                let should_emit = last_emit
+                    .lock()
+                    .map(|mut t| {
+                        if t.elapsed() >= Duration::from_millis(200) {
+                            *t = Instant::now();
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+                if should_emit {
+                    let name = path
+                        .file_name()
+                        .and_then(|x| x.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let _ = app.emit(
+                        "scan://progress",
+                        ScanProgress {
+                            done: done.load(Ordering::Relaxed),
+                            total,
+                            current: format!("生成缩略图 · {name}"),
+                        },
+                    );
+                }
+            });
+        }
+        drop(tx);
+
+        for (idx, res) in rx {
+            let ex = match res {
+                Ok(ex) if !ex.frames.is_empty() => ex,
+                _ => {
+                    if !cancel.load(Ordering::Relaxed) {
+                        failed += 1;
+                    }
+                    continue;
+                }
+            };
+            ok += 1;
+            let rec = &mut records[idx];
+            rec.frames = ex.frames.clone();
+            let dir = thumb_root().join(scanner::path_key(&rec.path));
+            let names: Vec<String> = ex
+                .frames
+                .iter()
+                .filter_map(|p| p.file_name().and_then(|x| x.to_str()).map(String::from))
+                .collect();
+            cache::save(
+                &dir,
+                &cache::CachedVideo {
+                    ver: cache::CACHE_VER,
+                    path: rec.path.to_string_lossy().to_string(),
+                    size: rec.meta.size,
+                    mtime: cache::mtime(&rec.path),
+                    width: rec.meta.width,
+                    height: rec.meta.height,
+                    duration: rec.meta.duration,
+                    bitrate: rec.meta.bitrate,
+                    hashes: rec.hashes.clone(),
+                    times: rec.times.clone(),
+                    frames: names,
+                },
+            );
+        }
+    });
+
+    crate::logging::log(&format!(
+        "[scan] frames need={} ok={} failed={} elapsed={:.1}s",
+        total,
+        ok,
+        failed,
+        started.elapsed().as_secs_f64()
+    ));
+    failed
 }
 
 fn spawn_scan(app2: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, recursive: bool, sim: u8, cancel: Arc<AtomicBool>) {
@@ -496,7 +675,10 @@ fn spawn_scan(app2: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, recur
         let mut slots: Vec<Option<VideoRecord>> = Vec::new();
         slots.resize_with(total, || None);
 
-        let (tx, rx) = std::sync::mpsc::channel::<(usize, VideoRecord)>();
+        let (tx, rx) = std::sync::mpsc::channel::<(usize, Result<VideoRecord, String>)>();
+
+        let mut failed = 0usize;
+        let mut failed_names: Vec<String> = Vec::new();
 
         std::thread::scope(|scope| {
             for _ in 0..workers {
@@ -513,9 +695,7 @@ fn spawn_scan(app2: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, recur
                     if i >= files.len() || cancel.load(Ordering::Relaxed) {
                         break;
                     }
-                    if let Some(rec) = process_one(&files[i], &cancel) {
-                        let _ = tx.send((i, rec));
-                    }
+                    let _ = tx.send((i, process_one(&files[i], &cancel)));
                     done.fetch_add(1, Ordering::Relaxed);
 
                     let should_emit = last_emit
@@ -549,14 +729,33 @@ fn spawn_scan(app2: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, recur
             }
             drop(tx);
 
-            for (i, rec) in rx {
-                if i < slots.len() {
-                    slots[i] = Some(rec);
+            for (i, res) in rx {
+                match res {
+                    Ok(rec) => {
+                        if i < slots.len() {
+                            slots[i] = Some(rec);
+                        }
+                    }
+                    Err(e) => {
+                        // 用户主动停止导致的错误不算失败
+                        if cancel.load(Ordering::Relaxed) {
+                            continue;
+                        }
+                        failed += 1;
+                        if failed_names.len() < 10 {
+                            let name = files
+                                .get(i)
+                                .and_then(|p| p.file_name())
+                                .and_then(|x| x.to_str())
+                                .unwrap_or("?");
+                            failed_names.push(format!("{name}: {e}"));
+                        }
+                    }
                 }
             }
         });
 
-        let records: Vec<VideoRecord> = slots.into_iter().flatten().collect();
+        let mut records: Vec<VideoRecord> = slots.into_iter().flatten().collect();
 
         let _ = app2.emit(
             "scan://progress",
@@ -564,6 +763,7 @@ fn spawn_scan(app2: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, recur
         );
 
         let groups = scanner::group_records(&records, sim);
+        failed += ensure_group_frames(&mut records, &groups, &cancel, &app2);
         let matched_files: usize = groups.iter().map(|(m, _)| m.len()).sum();
 
         let st2 = app2.state::<AppState>();
@@ -584,18 +784,23 @@ fn spawn_scan(app2: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, recur
                 groups: groups.len(),
                 files: total,
                 matched_files,
+                failed,
                 elapsed_ms: started.elapsed().as_millis() as u64,
             },
         );
 
         crate::logging::log(&format!(
-            "[scan] files={} groups={} matched={} elapsed={:.1}s workers={}",
+            "[scan] files={} groups={} matched={} failed={} elapsed={:.1}s workers={}",
             total,
             groups.len(),
             matched_files,
+            failed,
             started.elapsed().as_secs_f64(),
             workers
         ));
+        for e in &failed_names {
+            crate::logging::error(&format!("[scan] {e}"));
+        }
     });
 }
 
@@ -626,6 +831,7 @@ fn spawn_tool_scan(app: AppHandle, roots: Vec<PathBuf>, excludes: Vec<String>, r
                 "groups": 0,
                 "files": items.len(),
                 "matched_files": items.len(),
+                "failed": 0,
                 "elapsed_ms": started.elapsed().as_millis() as u64,
             }),
         );
@@ -655,6 +861,7 @@ fn spawn_image_scan(
         let workers = worker_count();
         let next = AtomicUsize::new(0);
         let done = AtomicUsize::new(0);
+        let failed = AtomicUsize::new(0);
         let last_emit = Mutex::new(Instant::now() - Duration::from_secs(5));
 
         let mut slots: Vec<Option<VideoRecord>> = Vec::new();
@@ -670,6 +877,7 @@ fn spawn_image_scan(
                 let files = &files;
                 let next = &next;
                 let done = &done;
+                let failed = &failed;
                 let last_emit = &last_emit;
 
                 scope.spawn(move || loop {
@@ -677,8 +885,15 @@ fn spawn_image_scan(
                     if i >= files.len() || cancel.load(Ordering::Relaxed) {
                         break;
                     }
-                    if let Some(r) = images::process(&files[i]) {
-                        let _ = tx.send((i, r));
+                    match images::process(&files[i]) {
+                        Some(r) => {
+                            let _ = tx.send((i, r));
+                        }
+                        None => {
+                            if !cancel.load(Ordering::Relaxed) {
+                                failed.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
                     }
                     done.fetch_add(1, Ordering::Relaxed);
 
@@ -742,15 +957,17 @@ fn spawn_image_scan(
                 groups: groups.len(),
                 files: total,
                 matched_files: matched,
+                failed: failed.load(Ordering::Relaxed),
                 elapsed_ms: started.elapsed().as_millis() as u64,
             },
         );
 
         crate::logging::log(&format!(
-            "[images] files={} groups={} matched={} elapsed={:.1}s",
+            "[images] files={} groups={} matched={} failed={} elapsed={:.1}s",
             total,
             groups.len(),
             matched,
+            failed.load(Ordering::Relaxed),
             started.elapsed().as_secs_f64()
         ));
     });
@@ -777,6 +994,9 @@ fn scan_start_scope(
     tool: Option<String>,
     recursive: Option<bool>,
 ) -> Result<(), String> {
+    if state.job_running.load(Ordering::SeqCst) {
+        return Err("有任务正在执行，请等待完成".to_string());
+    }
     if state.scanning.swap(true, Ordering::SeqCst) {
         return Err("已有扫描在进行中".to_string());
     }
@@ -819,7 +1039,8 @@ fn scan_start_scope(
 
     if tool == "similar-images" {
         let cancel = state.cancel.clone();
-        spawn_image_scan(app, roots, excludes, recursive, crate::config::default_sim(), cancel);
+        let sim = sim.unwrap_or_else(crate::config::default_sim).clamp(50, 100);
+        spawn_image_scan(app, roots, excludes, recursive, sim, cancel);
         return Ok(());
     }
 
@@ -829,7 +1050,8 @@ fn scan_start_scope(
     }
 
     let cancel = state.cancel.clone();
-    spawn_scan(app, roots, excludes, recursive, sim.unwrap_or(88).clamp(50, 100), cancel);
+    let sim = sim.unwrap_or_else(crate::config::default_sim).clamp(50, 100);
+    spawn_scan(app, roots, excludes, recursive, sim, cancel);
     Ok(())
 }
 
@@ -912,19 +1134,26 @@ fn get_groups(state: State<'_, AppState>, tool: Option<String>) -> Result<Vec<Gr
     let snap = snapshot_of(&state, tool);
     let groups = &snap.groups;
     let records = &snap.records;
-    let trashed = state.trashed.lock().map_err(|_| "状态锁失败")?;
 
-    let alive_of = |members: &[usize]| -> Vec<usize> {
-        members
+    // 先在锁内算好存活成员，释放锁后再读图/编码，避免阻塞隔离操作
+    let alive_groups: Vec<Vec<usize>> = {
+        let trashed = state.trashed.lock().map_err(|_| "状态锁失败")?;
+        groups
             .iter()
-            .copied()
-            .filter(|&m| !trashed.contains(&records[m].path.to_string_lossy().to_string()))
+            .map(|(members, _)| {
+                members
+                    .iter()
+                    .copied()
+                    .filter(|&m| {
+                        !trashed.contains(&records[m].path.to_string_lossy().to_string())
+                    })
+                    .collect()
+            })
             .collect()
     };
 
     let mut out = Vec::with_capacity(groups.len());
-    for (idx, (members, sim)) in groups.iter().enumerate() {
-        let alive = alive_of(members);
+    for (idx, ((_, sim), alive)) in groups.iter().zip(alive_groups.into_iter()).enumerate() {
         if alive.len() < 2 {
             continue;
         }
@@ -968,17 +1197,20 @@ fn group_detail(state: State<'_, AppState>, id: u64, tool: Option<String>) -> Re
     let snap = snapshot_of(&state, tool);
     let groups = &snap.groups;
     let records = &snap.records;
-    let trashed = state.trashed.lock().map_err(|_| "状态锁失败")?;
 
     let (all_members, sim) = groups
         .get(id as usize)
         .ok_or_else(|| format!("组 {id} 不存在"))?;
 
-    let members: Vec<usize> = all_members
-        .iter()
-        .copied()
-        .filter(|&m| !trashed.contains(&records[m].path.to_string_lossy().to_string()))
-        .collect();
+    // 锁内过滤已隔离文件，随后立即释放锁
+    let members: Vec<usize> = {
+        let trashed = state.trashed.lock().map_err(|_| "状态锁失败")?;
+        all_members
+            .iter()
+            .copied()
+            .filter(|&m| !trashed.contains(&records[m].path.to_string_lossy().to_string()))
+            .collect()
+    };
 
     if members.is_empty() {
         return Err("该组已全部清理".to_string());
@@ -1066,6 +1298,38 @@ fn group_detail(state: State<'_, AppState>, id: u64, tool: Option<String>) -> Re
     };
 
     Ok(GroupDetail { group, files, evidence })
+}
+
+#[tauri::command]
+fn delete_files_now(paths: Vec<String>) -> Result<serde_json::Value, String> {
+    let mut deleted = 0usize;
+    let mut bytes = 0u64;
+    let mut failed = 0usize;
+    for p in &paths {
+        let path = PathBuf::from(p);
+        if !path.is_file() {
+            continue;
+        }
+        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        match std::fs::remove_file(&path) {
+            Ok(_) => {
+                deleted += 1;
+                bytes += size;
+            }
+            Err(e) => {
+                failed += 1;
+                crate::logging::log(&format!("[quick-clean] 删除失败 {}: {e}", path.display()));
+            }
+        }
+    }
+    crate::logging::log(&format!(
+        "[quick-clean] deleted={deleted} bytes={bytes} failed={failed}"
+    ));
+    Ok(serde_json::json!({
+        "deleted": deleted,
+        "bytes": bytes,
+        "failed": failed,
+    }))
 }
 
 #[tauri::command]
@@ -1274,7 +1538,7 @@ pub fn run() {
                     if tool == "similar-videos" {
                         spawn_scan(app.handle().clone(), vec![path], Vec::new(), true, sim, cancel);
                     } else if tool == "similar-images" {
-                        spawn_image_scan(app.handle().clone(), vec![path], Vec::new(), true, crate::config::default_sim(), cancel);
+                        spawn_image_scan(app.handle().clone(), vec![path], Vec::new(), true, sim, cancel);
                     } else {
                         spawn_tool_scan(app.handle().clone(), vec![path], Vec::new(), true, tool, cancel);
                     }
@@ -1299,6 +1563,7 @@ pub fn run() {
             group_detail,
             get_items,
             get_tool,
+            delete_files_now,
             trash_files,
             undo_batch,
             list_batches,

@@ -1,4 +1,3 @@
-use crate::config;
 use crate::images;
 use crate::scanner;
 use serde::{Deserialize, Serialize};
@@ -271,7 +270,12 @@ pub fn run(
                 let a = video_args(&src, &d, &preset);
                 (d, a)
             } else {
-                let d = unique_path(&out_dir, &format!("{stem}_clean"), "jpg");
+                let ext = src
+                    .extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| x.to_ascii_lowercase())
+                    .unwrap_or_else(|| "jpg".to_string());
+                let d = unique_path(&out_dir, &format!("{stem}_clean"), &ext);
                 let a = exif_args(&src, &d);
                 (d, a)
             };
@@ -348,8 +352,4 @@ pub fn undo(out_dir: &Path) -> Result<usize, String> {
     }
     let _ = std::fs::remove_file(out_dir.join("manifest.json"));
     Ok(removed)
-}
-
-pub fn thumb_size_hint() -> u32 {
-    config::thumb_size()
 }

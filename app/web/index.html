@@ -67,7 +67,9 @@
     color:#a7aebb;font-size:12.5px;cursor:pointer;transition:.12s}
   .rail-item:hover{background:var(--panel2);color:var(--text)}
   .rail-item.on{background:rgba(76,154,255,.14);color:#cfe3ff}
-  .rail-item .ic{width:14px;text-align:center;opacity:.75;font-size:12px}
+  .rail-item .ic{width:16px;text-align:center;opacity:.8;font-size:12px;display:flex;
+    align-items:center;justify-content:center}
+  .rail-item .ic svg{width:15px;height:15px;display:block}
   .rail-sep{height:1px;background:var(--line);margin:8px 10px}
 
   /* list mode（非分组工具的平铺结果） */
@@ -134,7 +136,7 @@
   .pop-ft{display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid var(--line)}
 
   /* group list */
-  .list{width:368px;flex:0 0 368px;border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .list{width:368px;flex:0 0 368px;display:flex;flex-direction:column;min-height:0}
   .list-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex:0 0 auto}
   .sortchips{display:flex;gap:6px}
   .chip{font-size:11.5px;color:var(--muted);padding:3px 9px;border-radius:99px;border:1px solid transparent}
@@ -251,6 +253,7 @@
   .lightbox .lb-close:hover{background:rgba(255,90,90,.85);color:#fff}
   /* 图片结果 */
   .detail.image-mode .tlwrap{display:none}
+  .detail.image-mode .sync-grid{display:none}
   .img-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;padding:6px 18px 16px}
   .img-card{border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;
     background:var(--panel);transition:.15s;position:relative}
@@ -277,29 +280,70 @@
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .ev.note b{color:var(--text)}
 
-  .files{flex:1;min-height:0;overflow:auto;padding:6px 0 16px}
-  .f-row{display:block;padding:9px 18px;border-radius:var(--r8);transition:.15s}
-  .f-row:hover{background:#101319}
-  .f-row.del .f-strip{opacity:.6}
-  .f-head{display:flex;flex-direction:column;gap:3px;margin-bottom:6px;min-width:0}
-  .f-head-top{display:flex;align-items:center;gap:10px;min-width:0}
-  .f-path{display:flex;align-items:center;gap:5px;font-size:10.5px;color:#6b7386;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:82%}
-  .f-path svg{flex:0 0 auto;opacity:.65}
-  .f-path span{overflow:hidden;text-overflow:ellipsis}
-  .f-name{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%}
-  .f-spec{font-size:11px;color:var(--muted);white-space:nowrap}
+  .files{flex:1;min-height:0;overflow:auto;padding:4px 0 12px}
   .badge{font-size:10px;padding:1px 7px;border-radius:99px;white-space:nowrap}
   .badge.keep{color:#8ef0c4;background:rgba(52,211,153,.13)}
   .badge.del{color:#ff9d97;background:rgba(255,95,87,.13)}
-  .f-strip{display:flex;gap:4px}
-  .frame{position:relative;flex:1;min-width:88px;aspect-ratio:16/9;border-radius:4px;overflow:hidden;
-    border:1px solid #1f242e;filter:saturate(.92) brightness(.94);transition:.12s}
-  .frame::after{content:"";position:absolute;inset:0;background:
-    repeating-linear-gradient(90deg,rgba(255,255,255,.03) 0 1px,transparent 1px 7px)}
-  .frame.on{border-color:var(--accent);filter:saturate(1.15) brightness(1.12);
-    box-shadow:0 0 0 1px var(--accent),0 0 14px rgba(76,154,255,.35)}
-  .frame b{position:absolute;left:5px;bottom:4px;font-size:9.5px;color:#dfe6f3;opacity:.8;font-weight:500}
+
+  /* 内嵌同步对比网格 */
+  .sync-grid{display:grid;gap:8px;padding:10px 18px;flex:0 0 auto;grid-auto-rows:1fr;
+    height:clamp(210px,40vh,400px);border-bottom:1px solid var(--line)}
+  .sync-grid .pane{min-height:0;cursor:pointer}
+  .sync-grid .pane:hover{border-color:#3d4657}
+  .sync-grid .pane.keep{border-color:rgba(52,211,153,.26)}
+  .sync-grid .pane.del{border-color:rgba(255,95,87,.24)}
+  .sync-grid .pane .screen{flex:1;height:auto;width:100%;max-width:none;margin:0;
+    background-size:contain;background-repeat:no-repeat;background-position:center;background-color:#07090d}
+  .sync-grid .pane .cap{display:flex;align-items:center;gap:7px;padding:5px 9px;font-size:10.5px;
+    color:var(--muted);border-top:1px solid var(--line);background:var(--panel)}
+  .sync-grid .pane .cap .ltr{flex:0 0 auto;width:16px;height:16px;border-radius:4px;background:#232a36;
+    color:#9aa3b5;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center}
+  .sync-grid .pane.keep .cap .ltr{background:rgba(52,211,153,.16);color:#8ef0c4}
+  .sync-grid .pane.del .cap .ltr{background:rgba(255,95,87,.14);color:#ff9d97}
+  .sync-grid .pane .cap .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;color:#c7d0df}
+  .sync-grid .pane .cap .st{flex:0 0 auto;font-size:10px}
+  .sync-grid .pane .cap .st.keep{color:#8ef0c4}
+  .sync-grid .pane .cap .st.del{color:#ff9d97}
+
+  /* 可拖动的分隔条 */
+  .splitter{flex:0 0 5px;position:relative;background:transparent;z-index:6;touch-action:none}
+  .splitter::after{content:"";position:absolute;background:var(--line);transition:background .12s}
+  .splitter.v{cursor:col-resize}
+  .splitter.v::after{top:0;bottom:0;left:50%;width:1px;transform:translateX(-50%)}
+  .splitter.h{cursor:row-resize;flex:0 0 7px}
+  .splitter.h::after{left:0;right:0;top:50%;height:1px;transform:translateY(-50%)}
+  .splitter:hover::after,.splitter.on::after{background:var(--accent)}
+  .splitter.v:hover::after,.splitter.v.on::after{width:2px}
+  .splitter.h:hover::after,.splitter.h.on::after{height:2px}
+  body.resizing-v,body.resizing-v *{cursor:col-resize !important;user-select:none !important}
+  body.resizing-h,body.resizing-h *{cursor:row-resize !important;user-select:none !important}
+  main.list-mode .splitter,main.job-mode .splitter{display:none}
+  .detail.image-mode .splitter.h{display:none}
+
+  /* 快速清理确认弹窗 */
+  .dg-body{padding:16px 18px;font-size:12.5px;line-height:1.75;color:#a9b1c1}
+  .dg-body b{color:var(--text)}
+  .dg-body b.warn{color:#ff9d97}
+  .dg-list{margin-top:10px;border:1px solid var(--line);border-radius:8px;background:#11151c;
+    max-height:140px;overflow:auto;padding:6px 10px}
+  .dg-list div{font-size:11px;color:#8b93a5;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;padding:2px 0}
+
+  /* 精简文件行 */
+  .f-item{display:flex;align-items:center;gap:10px;padding:7px 18px;cursor:pointer;transition:.12s;
+    border-left:2px solid transparent}
+  .f-item:hover{background:#101319}
+  .f-item.del{opacity:.62}
+  .f-item .ltr{flex:0 0 20px;height:20px;border-radius:5px;background:rgba(52,211,153,.14);
+    color:#8ef0c4;font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center}
+  .f-item.del .ltr{background:rgba(255,95,87,.13);color:#ff9d97}
+  .f-item .thumb{flex:0 0 64px;height:36px;border-radius:4px;background-color:#0a0c10;
+    background-size:cover;background-position:center}
+  .f-item .meta{flex:1;min-width:0}
+  .f-item .n{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .f-item .s{font-size:10.5px;color:var(--muted);margin-top:2px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
 
   .d-foot{display:flex;align-items:center;gap:10px;padding:10px 18px;border-top:1px solid var(--line);
     background:var(--panel);flex:0 0 auto}
@@ -412,6 +456,8 @@
       <div class="list-body" id="groupList"></div>
     </section>
 
+    <div class="splitter v" id="splitList" title="拖动调整列表宽度"></div>
+
     <section class="detail">
       <div class="d-head">
         <div>
@@ -455,10 +501,15 @@
         </div>
       </div>
 
+      <div class="sync-grid" id="syncGrid"></div>
+
+      <div class="splitter h" id="splitGrid" title="拖动调整对比区高度"></div>
+
       <div class="files" id="files"></div>
 
       <div class="d-foot">
         <button class="btn danger" id="btnMark">标记删除 <span id="markCount">0</span></button>
+        <button class="btn ghost danger-text" id="btnQuick" title="直接删除文件，不进入隔离区，删除后无法恢复">⚡ 快速清理</button>
         <button class="btn ghost" id="btnUndo">撤销</button>
         <button class="btn ghost" id="btnKeepAll">全部保留</button>
         <span class="hint">
@@ -726,15 +777,35 @@ function applySort(){
 const totalDel = () => GROUPS.reduce((s,g)=>s + (g.files ? g.files.filter(f=>!f.keep).length : 0), 0);
 
 /* ---------------- rail ---------------- */
-const RAIL_FALLBACK = TOOLS.map(n => ({ name: n, glyph: ICONS[n] || "•" }));
+// 与设计稿一致的线性图标，避免 Unicode 字形在 WebView2 里显示成彩色 emoji 或方块
+const svgIcon = (inner)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const TOOL_ICONS = {
+  "duplicates": svgIcon('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
+  "empty-folders": svgIcon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+  "biggest-files": svgIcon('<path d="M12 3v11"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/>'),
+  "empty-files": svgIcon('<circle cx="12" cy="12" r="8" stroke-dasharray="3 3"/>'),
+  "temporary": svgIcon('<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>'),
+  "similar-images": svgIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5-9 9"/>'),
+  "similar-videos": svgIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/>'),
+  "same-music": svgIcon('<path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>'),
+  "invalid-symlinks": svgIcon('<path d="M11 6l1-1a4 4 0 0 1 6 6l-1 1"/><path d="M13 18l-1 1a4 4 0 0 1-6-6l1-1"/><path d="M9 15l6-6"/>'),
+  "broken-files": svgIcon('<path d="M12 3l9 17H3z"/><path d="M12 9v5"/><path d="M12 17.5h.01"/>'),
+  "bad-extensions": svgIcon('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9 17l6-6"/>'),
+  "bad-names": svgIcon('<text x="12" y="17.5" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor" stroke="none">Aa</text>'),
+  "exif-remover": svgIcon('<path d="M12 3l7 3v5.5c0 4.6-3.2 7.9-7 9.5-3.8-1.6-7-4.9-7-9.5V6z"/><path d="M9 12l2 2 4-4"/>'),
+  "video-optimizer": svgIcon('<path d="M4 7h9"/><path d="M19 7h1"/><circle cx="16" cy="7" r="2"/><path d="M4 17h1"/><path d="M11 17h9"/><circle cx="8" cy="17" r="2"/>')
+};
+const TOOL_IDS = ["duplicates","empty-folders","biggest-files","empty-files","temporary","similar-images","similar-videos","same-music","invalid-symlinks","broken-files","bad-extensions","bad-names","exif-remover","video-optimizer"];
+const RAIL_FALLBACK = TOOLS.map((n, i) => ({ id: TOOL_IDS[i], name: n, glyph: ICONS[n] || "•" }));
 function renderRail(items){
   const rail = document.getElementById("rail");
   rail.innerHTML = items.map(it => {
     const sep = it.group === "advanced" && !document.querySelector(".rail-sep") ? '<div class="rail-sep"></div>' : '';
     const dis = it.implemented === false ? "dis" : "";
     const on = it.id === currentTool ? "on" : "";
+    const icon = TOOL_ICONS[it.id] || it.glyph || "•";
     return `${sep}<div class="rail-item ${on} ${dis}" data-tool="${it.id}" title="${it.implemented === false ? '该工具尚未实现' : it.name}">
-      <span class="ic">${it.glyph||"•"}</span>${it.name}</div>`;
+      <span class="ic">${icon}</span>${it.name}</div>`;
   }).join("");
 
   rail.querySelectorAll(".rail-item").forEach(el=>{
@@ -756,7 +827,7 @@ async function runScan(path){
   try {
     localStorage.setItem("lastScanPath", path);
     ITEMS = []; selected.clear();
-    await TAURI.core.invoke("scan_start", { path, sim: 90, tool: currentTool });
+    await TAURI.core.invoke("scan_start", { path, sim: (APP_CFG && APP_CFG.default_sim) || 85, tool: currentTool });
     toast("扫描已启动");
   } catch (err) { toast("启动失败：" + err); }
 }
@@ -878,6 +949,9 @@ async function addPaths(kind){
 async function scanScope(){
   if (!SCOPE.includes.length) { toast("先添加扫描目录"); return; }
   if (SCOPE.includes.some(p => SCOPE.exists[p] === false)) { toast("有目录不存在，请先移除"); return; }
+  if (JOB_TOOLS.includes(currentTool)) { toast("当前工具不使用扫描，请直接开始任务"); return; }
+  if (RUNNING.scan) { toast("扫描正在进行中"); return; }
+  if (RUNNING.job) { toast("有任务正在执行，请等待完成后再扫描"); return; }
 
   const payload = {
     includes: SCOPE.includes,
@@ -888,41 +962,22 @@ async function scanScope(){
   };
 
   ITEMS = []; selected.clear();
+  RUNNING.scanTool = currentTool;
   setScanningUI(true);
   try {
-    await startScanWithRetry(payload, false);
+    await TAURI.core.invoke("scan_start_scope", payload);
     document.getElementById("pop").classList.remove("on");
     toast("扫描已启动");
   } catch (err) {
+    RUNNING.scanTool = null;
     setScanningUI(false);
     toast("启动失败：" + err);
   }
 }
 
-async function startScanWithRetry(payload, retried){
-  try {
-    await TAURI.core.invoke("scan_start_scope", payload);
-  } catch (e) {
-    const msg = String((e && e.message) || e);
-    if (!retried && msg.indexOf("已有扫描") >= 0) {
-      try { await TAURI.core.invoke("scan_cancel"); } catch (_) {}
-      for (let i = 0; i < 60; i++) {
-        let busy = false;
-        try { busy = await TAURI.core.invoke("is_scanning"); } catch (_) {}
-        if (!busy) break;
-        await new Promise(r => setTimeout(r, 150));
-      }
-      return startScanWithRetry(payload, true);
-    }
-    throw e;
-  }
-}
-
 function setScanningUI(on){
-  const btn = document.getElementById("btnScan");
-  if (btn) { btn.disabled = on; btn.textContent = on ? "扫描中…" : "扫描"; }
-  const stop = document.getElementById("btnStopScan");
-  if (stop) stop.disabled = !on;
+  RUNNING.scan = on;
+  syncTaskUI();
   if (on) {
     const pb = document.getElementById("progress");
     if (pb) {
@@ -930,6 +985,22 @@ function setScanningUI(on){
       document.getElementById("ptext").textContent = "准备中…";
       document.getElementById("pfill").style.width = "0%";
     }
+  }
+}
+
+// 顶栏按钮与当前任务状态保持一致
+function syncTaskUI(){
+  const btn = document.getElementById("btnScan");
+  if (btn) {
+    if (RUNNING.scan) { btn.disabled = true; btn.textContent = "扫描中…"; }
+    else if (RUNNING.job) { btn.disabled = true; btn.textContent = "任务进行中…"; }
+    else { btn.disabled = false; btn.textContent = "扫描"; }
+  }
+  const stop = document.getElementById("btnStopScan");
+  if (stop) stop.disabled = !RUNNING.scan;
+  // 任务状态变化时，刷新执行型工具的按钮禁用态
+  if (document.querySelector("main").classList.contains("job-mode") && !JOB.running) {
+    renderJobPage();
   }
 }
 
@@ -951,7 +1022,7 @@ async function openSettings(){
     document.getElementById("cfgTrash").value = c.trash_dir || "";
     document.getElementById("cfgThumb").value = String(c.thumb_size || 720);
     document.getElementById("cfgWorkers").value = String(c.workers || 0);
-    document.getElementById("cfgSim").value = c.default_sim || 90;
+    document.getElementById("cfgSim").value = c.default_sim || 85;
     document.getElementById("modalSet").classList.add("on");
     refreshCacheInfo();
   } catch (e) { toast("读取设置失败：" + e); }
@@ -976,7 +1047,7 @@ async function saveSettings(){
     trash_dir: document.getElementById("cfgTrash").value.trim(),
     thumb_size: Number(document.getElementById("cfgThumb").value) || 720,
     workers: Number(document.getElementById("cfgWorkers").value) || 0,
-    default_sim: Number(document.getElementById("cfgSim").value) || 90
+    default_sim: Number(document.getElementById("cfgSim").value) || 85
   };
   try {
     APP_CFG = await TAURI.core.invoke("set_config", { cfg });
@@ -1032,7 +1103,7 @@ function openAbout(){
           <b style="color:var(--text)">依赖</b><br>
           Tauri 2 · WebView2 · ffmpeg / ffprobe · Rust（image、blake3、serde）<br><br>
           <b style="color:var(--text)">数据位置</b><br>
-          配置与缓存默认在 <code style="font-size:10.5px">%LOCALAPPDATA%\\VideoCC</code>，可在设置中更改。
+          配置与缓存默认在 <code style="font-size:10.5px">%LOCALAPPDATA%\\VitoiceCompare</code>，可在设置中更改。
         </div>
         <div class="sheet-foot" style="display:flex;justify-content:flex-end">
           <button class="btn primary" id="aboutOk">知道了</button>
@@ -1063,9 +1134,17 @@ async function switchTool(id, meta){
     if (!VIEW.length && !ITEMS.length) {
       // 结果为空（可能是旧范围），提示用户手动重扫
     } else {
-      toast(`已切换到「${meta ? meta.name : id}」，使用上次结果`);
+      toast(`已切换到「${meta ? meta.name : id}」，使用上次结果` +
+        (taskBusy() ? " · 后台任务进行中，不会中断" : ""));
       return;
     }
+  }
+
+  if (taskBusy()) {
+    // 有任务在跑：允许切 tab 查看，但不启动新扫描、不打断当前任务
+    await loadResult();
+    toast(`任务进行中，已切换；完成后可扫描「${meta ? meta.name : id}」`);
+    return;
   }
 
   if (SCOPE.includes.length) {
@@ -1158,7 +1237,22 @@ async function previewFile(path, fallbackUrl){
 }
 /* ---------------- 执行型工具 ---------------- */
 const JOB_TOOLS = ["video-optimizer", "exif-remover"];
-let JOB = { tool: null, preview: null, preset: "social", running: false, result: null };
+const JOB_STATES = {};
+function jobState(tool){
+  if (!JOB_STATES[tool]) {
+    JOB_STATES[tool] = { tool, preview: null, preset: "social", running: false, result: null, progress: null };
+  }
+  return JOB_STATES[tool];
+}
+let JOB = { tool: null, preview: null, preset: "social", running: false, result: null, progress: null };
+
+// 全局任务状态：扫描 / 作业互斥，切换工具不影响正在执行的任务
+const RUNNING = { scan: false, scanTool: null, job: false, jobTool: null };
+const taskBusy = ()=> RUNNING.scan || RUNNING.job;
+function toolName(id){
+  const meta = (window.__TOOLS__ || []).find(x=>x.id === id);
+  return meta ? meta.name : id;
+}
 
 const JOB_PRESETS = {
   social:  { nm: "社交分享", ds: "1080p 上限 · H.264 · CRF 23", ratio: 0.32, tag: "省 68%" },
@@ -1167,14 +1261,16 @@ const JOB_PRESETS = {
 };
 
 async function jobEnter(tool){
-  JOB = { tool, preview: null, preset: "social", running: false, result: null };
+  JOB = jobState(tool);
   document.querySelector("main").classList.add("job-mode");
   document.querySelectorAll(".rail-item").forEach(x=>x.classList.toggle("on", x.dataset.tool === tool));
   const meta = (window.__TOOLS__ || []).find(x=>x.id === tool);
   if (meta) document.querySelector(".toolname").textContent = meta.name;
-  document.getElementById("jobStage").innerHTML =
-    `<div style="padding:48px 24px;color:#8b93a5;font-size:12px">正在统计文件…</div>`;
-  await loadJobPreview();
+  if (!JOB.running) {
+    document.getElementById("jobStage").innerHTML =
+      `<div style="padding:48px 24px;color:#8b93a5;font-size:12px">正在统计文件…</div>`;
+    await loadJobPreview();
+  }
   renderJobPage();
 }
 
@@ -1201,7 +1297,12 @@ function renderJobPage(){
   const stage = document.getElementById("jobStage");
   if (!stage) return;
   if (JOB.result) { stage.innerHTML = jobDoneHtml(); bindJobDone(); return; }
-  if (JOB.running) { stage.innerHTML = jobRunningHtml(); bindJobRunning(); return; }
+  if (JOB.running) {
+    stage.innerHTML = jobRunningHtml();
+    bindJobRunning();
+    if (JOB.progress) jobUpdateProgress(JOB.progress);
+    return;
+  }
   stage.innerHTML = jobConfigHtml();
   bindJobConfig();
 }
@@ -1258,10 +1359,12 @@ function jobConfigHtml(){
       </div>
       ${(p && p.notes && p.notes.length) ? `<div class="warnbox">⚠ ${p.notes.map(esc).join("<br>")}</div>` : ""}
       <div class="job-actions">
-        <button class="btn primary" id="jobStart" style="flex:1;height:38px" ${files.length? "" : "disabled"}>
+        <button class="btn primary" id="jobStart" style="flex:1;height:38px" ${files.length && !taskBusy() ? "" : "disabled"}>
           ${isVideo ? "开始优化" : "移除元数据"}
         </button>
       </div>
+      ${RUNNING.scan ? `<div class="warnbox">⚠ 扫描正在进行，完成后才能开始任务</div>` : ""}
+      ${RUNNING.job ? `<div class="warnbox">⚠ 另一个任务正在执行，完成后才能开始</div>` : ""}
       <div class="set-hint" style="margin-top:10px">原文件不会被修改；输出可随时从输出目录删除</div>
     </div>
   </div>`;
@@ -1279,9 +1382,15 @@ async function jobStart(){
   const files = (JOB.preview && JOB.preview.files) || [];
   if (!files.length) return toast("没有可处理的文件");
   if (!SCOPE.includes.length) return toast("先设置扫描范围");
+  if (RUNNING.scan) return toast("扫描进行中，完成后才能开始任务");
+  if (RUNNING.job) return toast("已有任务在执行，请等待完成");
 
   JOB.running = true;
   JOB.result = null;
+  JOB.progress = null;
+  RUNNING.job = true;
+  RUNNING.jobTool = JOB.tool;
+  syncTaskUI();
   renderJobPage();
   try {
     await TAURI.core.invoke("job_start", {
@@ -1292,6 +1401,9 @@ async function jobStart(){
     });
   } catch (e) {
     JOB.running = false;
+    RUNNING.job = false;
+    RUNNING.jobTool = null;
+    syncTaskUI();
     renderJobPage();
     toast("启动失败：" + e);
   }
@@ -1331,17 +1443,20 @@ function bindJobRunning(){
 }
 
 function jobUpdateProgress(p){
+  const st = RUNNING.jobTool ? jobState(RUNNING.jobTool) : JOB;
+  st.progress = p;
+  if (JOB !== st) return;   // 正在看别的工具页，进度先存着
   const meta = document.getElementById("jobMeta");
   const total = document.getElementById("jobTotal");
   if (meta) meta.textContent = `${p.done} / ${p.total} · ${p.current || ""}`;
   if (total) total.style.width = (p.pct || 0) + "%";
 
   document.querySelectorAll(".job-row").forEach((r, i)=>{
-    const st = r.querySelector(".stx");
+    const stx = r.querySelector(".stx");
     const bar = r.querySelector(".pbar .f");
-    if (!st || !bar) return;
-    if (i < p.done) { st.textContent = "完成"; st.style.color = "#8ef0c4"; bar.style.width = "100%"; }
-    else if (i === p.done) { st.textContent = "处理中"; bar.style.width = "45%"; }
+    if (!stx || !bar) return;
+    if (i < p.done) { stx.textContent = "完成"; stx.style.color = "#8ef0c4"; bar.style.width = "100%"; }
+    else if (i === p.done) { stx.textContent = "处理中"; bar.style.width = "45%"; }
   });
 }
 
@@ -1491,7 +1606,9 @@ function renderGroups(){
     const size = g.total_bytes
       ? (g.total_bytes/1048576).toFixed(1)
       : (g.files ? g.files.reduce((s,f)=>s+parseFloat(f.mb),0).toFixed(1) : "0");
-    const title = (g.files && g.files.length) ? g.files[0].n : `相似组 ${g.id+1}`;
+    const title = (g.files && g.files.length)
+      ? g.files[0].n
+      : ((g.names && g.names.length) ? g.names[0] : `相似组 ${g.id+1}`);
     return `<div class="g-item ${idx===cur?"on":""}" data-i="${idx}">
       <div class="g-thumbs">${thumbs}</div>
       <div class="g-main">
@@ -1582,8 +1699,6 @@ function dirLabel(p){
   return parts.slice(-2).join(" / ");
 }
 
-const ICON_DIR = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
-
 function renderDetail(){
   const g = VIEW[cur];
   if (!g || !g.files) return;
@@ -1599,8 +1714,11 @@ function renderDetail(){
   });
 
   const files = document.getElementById("files");
+  const grid = document.getElementById("syncGrid");
 
   if (isImages) {
+    grid.style.display = "none";
+    grid.innerHTML = "";
     files.innerHTML = `<div class="img-grid">${g.files.map((f,i)=>`
       <div class="img-card ${f.keep?"":"del"}" data-f="${i}">
         <button class="zoombtn" data-zoom="${i}" title="放大查看">⤢</button>
@@ -1634,51 +1752,58 @@ function renderDetail(){
     return;
   }
 
+  grid.style.display = "";
+  renderSyncGrid(g);
+
   files.innerHTML = g.files.map((f,fi)=>`
-    <div class="f-row ${f.keep?"":"del"}" data-f="${fi}">
-      <div class="f-head">
-        <div class="f-head-top">
-          <div class="f-name" title="${esc(f.n)}">${esc(f.n)}</div>
-          <span class="badge ${f.keep?"keep":"del"}">${f.keep?"保留":"将删除"}</span>
-          <div class="f-spec">${esc(f.res)} · ${f.br} Mbps · ${f.sec.toFixed(1)}s · ${f.mb} MB</div>
-        </div>
-        ${f.path ? `<div class="f-path" title="${esc(f.path)}">${ICON_DIR}<span>${esc(dirLabel(f.path))}</span></div>` : ""}
+    <div class="f-item ${f.keep?"":"del"}" data-f="${fi}" title="点击切换 保留 / 将删除">
+      <span class="ltr">${CMP_LETTERS[fi] || fi+1}</span>
+      <div class="thumb" style="${f.frames && f.frames[0] && f.frames[0].url
+        ? `background-image:url('${f.frames[0].url}')`
+        : `background:${grad(g.id*7+fi, 0)}`}"></div>
+      <div class="meta">
+        <div class="n" title="${esc(f.n)}">${esc(f.n)}</div>
+        <div class="s" title="${esc(f.path || "")}">${esc(f.res)} · ${f.br} Mbps · ${f.sec.toFixed(1)}s · ${f.mb} MB${f.path ? " · " + esc(dirLabel(f.path)) : ""}</div>
       </div>
-      <div class="f-strip" data-fi="${fi}">
-        ${framesOf(f).map((fr,i)=>{
-          const bg = fr.url
-            ? `background-image:url('${fr.url}');background-size:cover;background-position:center`
-            : `background:${grad(g.id*7+fi, i)}`;
-          return `<div class="frame" data-i="${i}" style="${bg}"><b>${fmt(fr.at)}</b></div>`;
-        }).join("")}
-      </div>
+      <span class="badge ${f.keep?"keep":"del"}">${f.keep?"保留":"将删除"}</span>
     </div>`).join("");
 
-  files.querySelectorAll(".f-row .frame").forEach(fr=>{
-    fr.onclick = (e)=>{
-      e.stopPropagation();
-      const strip = fr.closest(".f-strip");
-      const fi = +strip.dataset.fi;
-      const file = g.files[fi];
-      const list = framesOf(file);
-      const idx = +fr.dataset.i;
-      const f0 = list[idx] || list[0];
-      previewFile(file.path, f0 && f0.url);
-    };
-  });
-
-  files.querySelectorAll(".f-row").forEach(row=>{
-    row.onclick = (e)=>{
-      if(e.target.closest(".frame")) return;
-      const fi = +row.dataset.f;
-      g.files[fi].keep = !g.files[fi].keep;
-      markGroupKept(g, g.files.every(f=>f.keep));
-      renderDetail(); syncFooter(); renderGroups();
-    };
+  files.querySelectorAll(".f-item").forEach(row=>{
+    row.onclick = ()=>toggleFileKeep(+row.dataset.f);
   });
   syncFrames();
   syncFooter();
   renderAnalysis();
+}
+
+function syncCols(n){
+  return n <= 2 ? Math.max(1, n) : n <= 4 ? 2 : n <= 9 ? 3 : 4;
+}
+
+function renderSyncGrid(g){
+  const grid = document.getElementById("syncGrid");
+  grid.style.gridTemplateColumns = `repeat(${syncCols(g.files.length)}, 1fr)`;
+  grid.innerHTML = g.files.map((f,i)=>`
+    <div class="pane ${f.keep?"keep":"del"}" data-f="${i}"
+      title="${esc(f.n)} · ${esc(f.res)} · ${f.br} Mbps · ${f.mb} MB">
+      <div class="screen" id="sp${i}"></div>
+      <div class="cap">
+        <span class="ltr">${CMP_LETTERS[i] || i+1}</span>
+        <span class="nm">${esc(f.n)}</span>
+        <span class="st ${f.keep?"keep":"del"}">${f.keep?"保留":"将删除"}</span>
+      </div>
+    </div>`).join("");
+  grid.querySelectorAll(".pane").forEach(p=>{
+    p.onclick = ()=>toggleFileKeep(+p.dataset.f);
+  });
+}
+
+function toggleFileKeep(fi){
+  const g = VIEW[cur];
+  if (!g || !g.files || !g.files[fi]) return;
+  g.files[fi].keep = !g.files[fi].keep;
+  markGroupKept(g, g.files.every(f=>f.keep));
+  renderDetail(); syncFooter(); renderGroups();
 }
 
 function renderAnalysis(){
@@ -1718,16 +1843,60 @@ function fmt(t){ const m=Math.floor(t/60), s=(t%60); return `${String(m).padStar
 function syncFrames(){
   const g = VIEW[cur];
   if (!g || !g.files) return;
-  document.querySelectorAll("#files .f-strip").forEach(strip=>{
-    const frames = strip.querySelectorAll(".frame");
-    const n = frames.length || 1;
-    const idx = Math.min(n-1, Math.round(pos*(n-1)));
-    frames.forEach((f,i)=>f.classList.toggle("on", i===idx));
+  g.files.forEach((f,i)=>{
+    const fr = framesOf(f);
+    const idx = Math.min(fr.length-1, Math.round(pos*(fr.length-1)));
+    const cur0 = fr[idx] || fr[0];
+    const screen = document.getElementById("sp"+i);
+    if (!screen) return;
+    if (cur0 && cur0.url){
+      screen.style.background = "#07090d";
+      screen.style.backgroundImage = `url('${cur0.url}')`;
+      screen.style.backgroundSize = "contain";
+      screen.style.backgroundPosition = "center";
+      screen.style.backgroundRepeat = "no-repeat";
+    } else {
+      screen.style.background = grad(g.id*7+i, idx);
+    }
   });
   const f0 = g.files[0];
   const fr = framesOf(f0);
   const i = Math.min(fr.length-1, Math.round(pos*(fr.length-1)));
   document.getElementById("tc").textContent = fmt(fr[i] ? fr[i].at : 0);
+  paintSync();
+}
+
+let spSeq = 0, spTimer = null;
+function paintSync(immediate){
+  if (immediate) { doPaintSync(); return; }
+  clearTimeout(spTimer);
+  spTimer = setTimeout(doPaintSync, 110);
+}
+
+async function doPaintSync(){
+  const g = VIEW[cur];
+  if (!g || !g.files) return;
+  const grid = document.getElementById("syncGrid");
+  if (!grid || grid.style.display === "none") return;
+  const seq = ++spSeq;
+  const files = g.files;
+  // 与全屏对比共用同一档宽度，命中同一份缓存
+  const width = files.length <= 2 ? 1440 : files.length <= 4 ? 1100 : 900;
+
+  await Promise.all(files.map(async (f, i)=>{
+    const screen = document.getElementById("sp"+i);
+    if (!screen) return;
+    const fr = framesOf(f);
+    const idx = Math.min(fr.length-1, Math.round(pos*(fr.length-1)));
+    const cur0 = fr[idx] || fr[0];
+    if (!cur0) return;
+    const src = await cmpSource(f, cur0.at, width);
+    if (seq !== spSeq || !src) return;
+    screen.style.backgroundImage = `url('${src}')`;
+    screen.style.backgroundSize = "contain";
+    screen.style.backgroundPosition = "center";
+    screen.style.backgroundRepeat = "no-repeat";
+  }));
 }
 
 function syncFooter(){
@@ -1786,6 +1955,82 @@ document.getElementById("btnKeepAll").onclick = async ()=>{
 };
 
 
+/* 快速清理：彻底删除，不进隔离区 */
+function confirmDanger(opts){
+  return new Promise(resolve=>{
+    let m = document.getElementById("modalDanger");
+    if (!m){
+      m = document.createElement("div");
+      m.id = "modalDanger";
+      m.className = "modal";
+      m.innerHTML = `
+        <div class="sheet" style="width:min(520px,92vw)">
+          <div class="sheet-head">
+            <div style="font-size:14px;font-weight:600;color:#ff9d97">⚡ 快速清理</div>
+            <div class="spacer"></div>
+            <button class="btn ghost" id="dgClose">关闭</button>
+          </div>
+          <div class="dg-body" id="dgBody"></div>
+          <div class="sheet-foot">
+            <span class="pop-hint">此操作不可撤销</span>
+            <div class="spacer"></div>
+            <button class="btn ghost" id="dgCancel">取消</button>
+            <button class="btn danger" id="dgOk">直接删除</button>
+          </div>
+        </div>`;
+      document.body.appendChild(m);
+    }
+
+    const names = opts.names || [];
+    const shown = names.slice(0, 8);
+    const more = names.length - shown.length;
+    m.querySelector("#dgBody").innerHTML = `
+      <p style="margin:0"><b>${opts.count} 个文件</b>（<b>${fmtSize(opts.bytes)}</b>）将被<b class="warn">直接删除</b>，
+      <b class="warn">不进入隔离区</b>，删除后<b class="warn">无法恢复</b>。</p>
+      <p style="margin:8px 0 0;font-size:11.5px;color:#8b93a5">
+        跳过隔离区可立即释放磁盘空间；如需可撤销，请改用「标记删除」。</p>
+      ${shown.length ? `<div class="dg-list">${shown.map(n=>`<div>${esc(n)}</div>`).join("")}${
+        more > 0 ? `<div>… 另有 ${more} 个文件</div>` : ""}</div>` : ""}`;
+
+    let done = false;
+    const finish = (v)=>{
+      if (done) return;
+      done = true;
+      document.removeEventListener("keydown", onKey, true);
+      m.classList.remove("on");
+      resolve(v);
+    };
+    const onKey = (e)=>{
+      if (e.key === "Escape"){ e.preventDefault(); finish(false); }
+    };
+    document.addEventListener("keydown", onKey, true);
+
+    m.querySelector("#dgClose").onclick = ()=>finish(false);
+    m.querySelector("#dgCancel").onclick = ()=>finish(false);
+    m.querySelector("#dgOk").onclick = ()=>finish(true);
+    m.onclick = (e)=>{ if (e.target === m) finish(false); };
+
+    m.classList.add("on");
+    setTimeout(()=>{ const b = m.querySelector("#dgCancel"); if (b) b.focus(); }, 30);
+  });
+}
+
+// 删除后刷新结果并跳到同一位置的下一个可见组
+async function afterGroupRemoval(g, removed, at){
+  KEPT_GROUP_IDS.delete(g.id);
+  removed.forEach(f=>{ if (f.path) KEEP_BY_PATH.delete(f.path); });
+  await loadResult();
+  if (VIEW.length) {
+    const idx = pickVisible(at);
+    if (idx >= 0 && idx !== cur) {
+      cur = idx;
+      renderGroups();
+      await ensureDetail(cur);
+      renderDetail();
+    }
+  }
+}
+
 document.getElementById("btnMark").onclick = async ()=>{
   if (document.querySelector("main").classList.contains("list-mode")) {
     if (!(TAURI && TAURI.core)) return toast("浏览器预览模式不支持删除");
@@ -1806,21 +2051,31 @@ document.getElementById("btnMark").onclick = async ()=>{
     const at = cur;
     const r = await TAURI.core.invoke("trash_files", { paths: dels.map(f=>f.path) });
     lastBatch = r.batch;
-    KEPT_GROUP_IDS.delete(g.id);
-    dels.forEach(f=>{ if (f.path) KEEP_BY_PATH.delete(f.path); });
     toast(`已隔离 ${r.moved} 个文件 · ${(r.bytes/1048576).toFixed(1)} MB`);
-    await loadResult();
-    // 处理完停在同一位置的下一个可见组，而不是被隐藏的组
-    if (VIEW.length) {
-      const idx = pickVisible(at);
-      if (idx >= 0 && idx !== cur) {
-        cur = idx;
-        renderGroups();
-        await ensureDetail(cur);
-        renderDetail();
-      }
-    }
+    await afterGroupRemoval(g, dels, at);
     refreshTrashCount();
+  });
+};
+
+document.getElementById("btnQuick").onclick = async ()=>{
+  await withDetail(async g=>{
+    const dels = g.files.filter(f=>!f.keep);
+    if(!dels.length) return toast("本组没有待删除文件");
+    const bytes = dels.reduce((s,f)=>s + (f.bytes || parseFloat(f.mb)*1048576), 0);
+    const ok = await confirmDanger({
+      count: dels.length,
+      bytes,
+      names: dels.map(f=>f.n)
+    });
+    if (!ok) return;
+    const paths = dels.map(f=>f.path).filter(Boolean);
+    if (!(TAURI && TAURI.core) || !paths.length) return toast("浏览器预览模式不支持删除");
+    const at = cur;
+    const r = await TAURI.core.invoke("delete_files_now", { paths });
+    toast(r.failed
+      ? `已直接删除 ${r.deleted} 个文件 · ${fmtSize(r.bytes)} · ${r.failed} 个失败`
+      : `已直接删除 ${r.deleted} 个文件 · ${fmtSize(r.bytes)}`);
+    await afterGroupRemoval(g, dels, at);
   });
 };
 
@@ -2071,11 +2326,76 @@ async function doPaint(){
   if (tc) tc.textContent = fmt(fr0[idx0] ? fr0[idx0].at : 0);
 }
 
+/* 可拖动分隔条 */
+(function initSplitters(){
+  const main = document.querySelector("main");
+  const rail = document.querySelector(".rail");
+  const list = document.querySelector(".list");
+  const detail = document.querySelector(".detail");
+  const grid = document.getElementById("syncGrid");
+  const listSp = document.getElementById("splitList");
+  const gridSp = document.getElementById("splitGrid");
+  const clamp = (v, min, max)=>Math.max(min, Math.min(max, v));
+
+  const listMax = ()=>Math.max(260, main.clientWidth - rail.offsetWidth - 360);
+  const gridMax = ()=>Math.max(200, detail.clientHeight - 260);
+
+  function setListW(w){
+    w = Math.round(w);
+    list.style.width = w + "px";
+    list.style.flex = `0 0 ${w}px`;
+  }
+  function setGridH(h){
+    grid.style.height = Math.round(h) + "px";
+  }
+
+  const savedList = Number(localStorage.getItem("ui.listW"));
+  if (savedList) setListW(clamp(savedList, 240, listMax()));
+  const savedGrid = Number(localStorage.getItem("ui.gridH"));
+  if (savedGrid) setGridH(clamp(savedGrid, 140, gridMax()));
+
+  function drag(sp, kind, e){
+    e.preventDefault();
+    sp.classList.add("on");
+    const vertical = kind === "list";
+    const start = vertical ? e.clientX : e.clientY;
+    const startSize = vertical
+      ? list.getBoundingClientRect().width
+      : grid.getBoundingClientRect().height;
+    document.body.classList.add(vertical ? "resizing-v" : "resizing-h");
+    const move = (ev)=>{
+      const d = (vertical ? ev.clientX : ev.clientY) - start;
+      if (vertical) setListW(clamp(startSize + d, 240, listMax()));
+      else setGridH(clamp(startSize + d, 140, gridMax()));
+    };
+    const up = ()=>{
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      sp.classList.remove("on");
+      document.body.classList.remove("resizing-v", "resizing-h");
+      localStorage.setItem(vertical ? "ui.listW" : "ui.gridH",
+        Math.round(vertical ? list.getBoundingClientRect().width : grid.getBoundingClientRect().height));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  listSp.addEventListener("pointerdown", e=>drag(listSp, "list", e));
+  gridSp.addEventListener("pointerdown", e=>drag(gridSp, "grid", e));
+
+  window.addEventListener("resize", ()=>{
+    if (list.style.flex) setListW(clamp(list.getBoundingClientRect().width, 240, listMax()));
+    if (grid.style.height) setGridH(clamp(grid.getBoundingClientRect().height, 140, gridMax()));
+  });
+})();
+
 
 
 /* keyboard */
 document.addEventListener("keydown", (e)=>{
   if(e.target.tagName === "INPUT") return;
+  const danger = document.getElementById("modalDanger");
+  if (danger && danger.classList.contains("on")) return;
   const k = e.key.toLowerCase();
   if(k === "j"){ cur = stepGroup(cur, 1); pos=0; renderGroups(); ensureDetail(cur).then(()=>renderDetail()); }
   if(k === "k"){ cur = stepGroup(cur, -1); pos=0; renderGroups(); ensureDetail(cur).then(()=>renderDetail()); }
@@ -2170,6 +2490,8 @@ function clearDetail(){
   document.getElementById("dTitle").textContent = "没有相似分组";
   document.getElementById("dSub").textContent = "调整相似度阈值后重新扫描，或换个目录试试";
   document.getElementById("files").innerHTML = "";
+  const sg = document.getElementById("syncGrid");
+  if (sg) { sg.innerHTML = ""; sg.style.display = "none"; }
   ["anMatch","anRun","anFree"].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent = "—"; });
   document.getElementById("anBars").innerHTML = "";
   document.getElementById("anAudio").textContent = "—";
@@ -2196,33 +2518,52 @@ async function boot(){
         });
         await TAURI.event.listen("job://progress", (e)=> jobUpdateProgress(e.payload || {}));
         await TAURI.event.listen("job://finished", async (e)=>{
-          JOB.running = false;
-          JOB.result = e.payload || {};
+          const payload = e.payload || {};
+          const tool = RUNNING.jobTool || JOB.tool;
+          const st = jobState(tool);
+          st.running = false;
+          st.result = payload;
+          st.progress = null;
+          RUNNING.job = false;
+          RUNNING.jobTool = null;
           try { await TAURI.core.invoke("job_finish"); } catch (_) {}
-          renderJobPage();
+          if (JOB.tool === tool) JOB.result = payload;
+          syncTaskUI();
+          if (JOB.tool === tool) renderJobPage();
+          toast(JOB.tool === tool
+            ? (payload.cancelled ? "任务已停止" : "任务完成")
+            : `「${toolName(tool)}」任务完成，切换回该工具查看结果`);
         });
         await TAURI.event.listen("scan://finished", async (e)=>{
           const s = e.payload || {};
+          const finishedTool = s.tool || RUNNING.scanTool || currentTool;
+          const sameTool = finishedTool === currentTool;
           document.getElementById("pfill").style.width = "100%";
           document.getElementById("ptext").textContent =
             `完成 · ${s.groups} 组 / ${s.matched_files} 个相似文件 · ${(s.elapsed_ms/1000).toFixed(1)}s`;
           setScanningUI(false);
-          document.getElementById("btnStopScan").disabled = false;
-          resetKeepState();
-          await loadResult();
-          toast(`扫描完成：${s.groups} 组，${s.matched_files} 个相似文件`);
+          RUNNING.scanTool = null;
+
+          if (sameTool) {
+            resetKeepState();
+            await loadResult();
+            toast(`扫描完成：${s.groups} 组，${s.matched_files} 个相似文件` +
+              (s.failed ? `，${s.failed} 个文件失败（详见日志）` : ""));
+            if (devAutoCompare) {
+              await ensureDetail(0);
+              renderDetail();
+              document.getElementById("btnCompare").click();
+            } else if (document.getElementById("modal").classList.contains("on")) {
+              paintCompare();
+            }
+            applyDemoPos();
+            if (devAutoTrash) {
+              setTimeout(()=>document.getElementById("btnMark").click(), 400);
+            }
+          } else {
+            toast(`「${toolName(finishedTool)}」扫描完成，切换回该工具查看结果`);
+          }
           setTimeout(()=>document.getElementById("progress").classList.remove("on"), 4000);
-          if (devAutoCompare) {
-            await ensureDetail(0);
-            renderDetail();
-            document.getElementById("btnCompare").click();
-          } else if (document.getElementById("modal").classList.contains("on")) {
-            paintCompare();
-          }
-          applyDemoPos();
-          if (devAutoTrash) {
-            setTimeout(()=>document.getElementById("btnMark").click(), 400);
-          }
         });
       }
 

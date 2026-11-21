@@ -1,5 +1,5 @@
 ﻿use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub const CACHE_VER: u32 = 2;
 
@@ -19,10 +19,6 @@ pub struct CachedVideo {
     pub frames: Vec<String>,
 }
 
-pub fn dir_for(root: &Path, file: &Path) -> PathBuf {
-    root.join(crate::scanner::path_key(file))
-}
-
 pub fn mtime(p: &Path) -> u64 {
     std::fs::metadata(p)
         .ok()
@@ -32,8 +28,9 @@ pub fn mtime(p: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// 命中条件：size + mtime 未变，且所有帧图仍在。
-pub fn load(dir: &Path, file: &Path) -> Option<CachedVideo> {
+/// 读取元数据：只要求 size / mtime / 哈希有效，不要求展示帧已生成。
+/// 第一阶段扫描用它复用哈希，第二阶段再按需补缩略图。
+pub fn load_meta(dir: &Path, file: &Path) -> Option<CachedVideo> {
     let txt = std::fs::read_to_string(dir.join("meta.json")).ok()?;
     let c: CachedVideo = serde_json::from_str(&txt).ok()?;
     let md = std::fs::metadata(file).ok()?;
@@ -43,7 +40,16 @@ pub fn load(dir: &Path, file: &Path) -> Option<CachedVideo> {
     if c.size != md.len() || c.mtime != mtime(file) {
         return None;
     }
-    if c.frames.is_empty() || c.hashes.is_empty() {
+    if c.hashes.is_empty() {
+        return None;
+    }
+    Some(c)
+}
+
+/// 命中条件：size + mtime 未变，且展示帧已生成、所有帧图仍在。
+pub fn load(dir: &Path, file: &Path) -> Option<CachedVideo> {
+    let c = load_meta(dir, file)?;
+    if c.frames.is_empty() {
         return None;
     }
     for f in &c.frames {

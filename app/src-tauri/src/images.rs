@@ -1,18 +1,8 @@
-﻿use crate::cache::{self, CachedVideo, CACHE_VER};
+use crate::cache::{self, CachedVideo, CACHE_VER};
 use crate::media;
-use crate::model::Item;
 use crate::scanner::{self, VideoRecord};
+use crate::walk;
 use std::path::{Path, PathBuf};
-
-const RESERVED: &[&str] = &["_optimized", "_clean", "_backup"];
-
-fn is_reserved(p: &std::path::Path) -> bool {
-    p.components().any(|c| {
-        let s = c.as_os_str().to_string_lossy().to_ascii_lowercase();
-        RESERVED.contains(&s.as_str())
-    })
-}
-
 
 pub const EXT: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "gif", "tif", "tiff"];
 
@@ -25,46 +15,15 @@ fn is_image(p: &Path) -> bool {
     EXT.contains(&ext.as_str())
 }
 
-fn norm(p: &Path) -> String {
-    p.to_string_lossy().replace('/', "\\").to_lowercase().trim_end_matches('\\').to_string()
-}
-
-fn excluded(p: &Path, excludes: &[String]) -> bool {
-    if excludes.is_empty() {
-        return false;
-    }
-    let s = norm(p);
-    excludes
-        .iter()
-        .filter(|e| !e.is_empty())
-        .any(|e| s == *e || s.starts_with(&format!("{e}\\")))
-}
-
 pub fn collect(roots: &[PathBuf], excludes: &[String], recursive: bool) -> Vec<PathBuf> {
-    let mut seen = std::collections::HashSet::new();
-    let mut out = Vec::new();
-    for root in roots {
-        let mut walker = walkdir::WalkDir::new(root).follow_links(false);
-        if !recursive {
-            walker = walker.max_depth(1);
-        }
-        for e in walker.into_iter().filter_map(|r| r.ok()) {
-            if !e.file_type().is_file() {
-                continue;
-            }
-            let p = e.path();
-            if is_reserved(p) || excluded(p, excludes) || !is_image(p) {
-                continue;
-            }
-            if seen.insert(norm(p)) {
-                out.push(p.to_path_buf());
-            }
-        }
-    }
-    out
+    walk::walk(roots, excludes, recursive, false, None)
+        .into_iter()
+        .map(|(p, _)| p)
+        .filter(|p| is_image(p))
+        .collect()
 }
 
-/// 解析一张图：生成 720px 缩略图 + 64bit dHash，并带缓存
+/// 解析一张图：生成缩略图 + 64bit pHash，并带缓存
 pub fn process(file: &Path) -> Option<VideoRecord> {
     let dir = crate::thumb_root().join(scanner::path_key(file));
 
@@ -123,13 +82,6 @@ pub fn process(file: &Path) -> Option<VideoRecord> {
     })
 }
 
-pub fn scan(roots: &[PathBuf], excludes: &[String], recursive: bool) -> Vec<VideoRecord> {
-    collect(roots, excludes, recursive)
-        .iter()
-        .filter_map(|p| process(p))
-        .collect()
-}
-
 fn hamming(a: u64, b: u64) -> u32 {
     (a ^ b).count_ones()
 }
@@ -172,8 +124,17 @@ pub fn group(records: &[VideoRecord], sim: u8) -> Vec<(Vec<usize>, u8)> {
     }
 
     let mut seen = std::collections::HashSet::new();
+    // 单个倒排桶过大通常意味着大量纯色/近似图；提高上限并记录告警，避免静默丢弃
+    const MAX_BUCKET: usize = 20_000;
     for members in buckets.values() {
-        if members.len() < 2 || members.len() > 4000 {
+        if members.len() < 2 {
+            continue;
+        }
+        if members.len() > MAX_BUCKET {
+            crate::logging::log(&format!(
+                "[images] 桶内候选 {} 个，超过上限 {MAX_BUCKET}，该桶跳过比对",
+                members.len()
+            ));
             continue;
         }
         for i in 0..members.len() {
@@ -220,15 +181,4 @@ pub fn group(records: &[VideoRecord], sim: u8) -> Vec<(Vec<usize>, u8)> {
     }
     out.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.len().cmp(&a.0.len())));
     out
-}
-
-pub fn to_item(p: &Path) -> Item {
-    let size = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-    Item {
-        path: p.to_string_lossy().to_string(),
-        name: p.file_name().and_then(|x| x.to_str()).unwrap_or("").to_string(),
-        size,
-        detail: "图片".to_string(),
-        kind: "image".to_string(),
-    }
 }
